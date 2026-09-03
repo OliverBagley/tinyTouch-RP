@@ -136,6 +136,10 @@ bool device_config_remove_hid_host(const uint8_t id[DEVICE_CONFIG_HID_KEY_ID_SIZ
   bool ok = replace_locked(&candidate); unlock(); return ok;
 }
 
+uint8_t device_config_fingerprint_profile_views(void) {
+  lock(); uint8_t value = config.fingerprint_profile_views; unlock(); return value;
+}
+
 bool device_config_set_fingerprint_profile_views(uint8_t views) {
   lock(); stored_config_t candidate = config; candidate.fingerprint_profile_views = views;
   bool ok = replace_locked(&candidate); unlock(); return ok;

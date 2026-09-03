@@ -127,11 +127,10 @@ static void authorize(void) {
 #endif
   int count = fingerprint_count();
   if (count < 0) { reply("ERR AUTH sensor=offline"); return; }
-  // A device with no paired computer and no PIV identity protects nothing
-  // yet, so it must not be locked by templates a sensor shipped with or kept
-  // from an earlier owner. Enrollment replaces them.
-  bool first_setup = count == 0 ||
-                     (device_config_hid_host_count() == 0 && !piv_uses_provisioned_keys());
+  // The fingerprint gate exists once this firmware has enrolled a finger.
+  // Until then, templates a sensor shipped with or kept from another board
+  // must not lock the device: setup erases and replaces them.
+  bool first_setup = count == 0 || device_config_fingerprint_profile_views() == 0;
   bool ok = first_setup || fingerprint_authorize_prompted(touch_prompt);
   if (!ok) { reply("ERR AUTH no_match"); return; }
   authorized_until = now_us() + AUTH_WINDOW_US;
@@ -231,7 +230,8 @@ static void fingerprint_command(char *arguments) {
   uint32_t slot = 0;
   bool ok = false;
   if (strncmp(arguments, "ENROLL ", 7) == 0 && parse_u32(arguments + 7, UINT16_MAX, &slot)) {
-    ok = fingerprint_enroll((uint16_t)slot, enroll_prompt);
+    ok = fingerprint_enroll((uint16_t)slot, enroll_prompt) &&
+         device_config_set_fingerprint_profile_views((uint8_t)slot);
   } else if (strncmp(arguments, "DELETE ", 7) == 0 && parse_u32(arguments + 7, UINT16_MAX, &slot)) {
     ok = fingerprint_delete((uint16_t)slot) && device_config_set_fingerprint_profile_views(0);
   } else if (strcmp(arguments, "CLEAR") == 0) {
