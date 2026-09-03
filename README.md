@@ -58,7 +58,7 @@ GitHub's computers build the firmware for you. Every push to `main` builds it, a
 
 1. Open your repository on github.com and click the **Actions** tab.
 2. In the left list click **CI**, then the **Run workflow** button on the right.
-3. If your sensor is wired to the default pins (Part 3), leave the three boxes empty. Otherwise type the GP numbers: the board pin wired to the sensor's RX, the board pin wired to the sensor's TX, and the TouchOut pin. Numbers only, for example `8`, `9`, `10`.
+3. If your sensor is wired to the default pins (Part 3), leave the three boxes empty. Otherwise look at where each sensor wire goes and type the GP numbers: the pin the sensor's **TX** wire is on, the pin the sensor's **RX** wire is on, and the pin the **TouchOut** wire is on. Numbers only. For example, sensor TX on GP9, sensor RX on GP8, TouchOut on GP3 is `9`, `8`, `3`.
 4. Click the green **Run workflow** button and wait for the new run to get a green tick. A wrong pin pair fails the build with a message listing the valid pairs.
 5. Click the run, scroll down to **Artifacts**, and click **tinytouch-firmware-rp2040**. A zip downloads.
 6. Unzip it. Inside is `tiny_touch_unified.uf2`. That is the firmware. Skip to Part 3.
@@ -107,9 +107,9 @@ Double check that 3V3 and GND do not touch each other before plugging in USB.
 
 The board is the boss, not the sensor: the sensor's six wires can go to any pins you like, as long as the firmware knows which ones. Only the three numbered pins matter. Power and ground can use any 3V3 and GND pin.
 
-The RP2040 chip can only do serial (TX/RX) on certain pin pairs. Pick **one pair** from this table. TouchOut can be any other free GP pin.
+The RP2040 chip can only do serial (TX/RX) on certain pin pairs, and the direction is fixed: the sensor's **TX** wire must land on the second pin of a pair and the sensor's **RX** wire on the first. Pick **one row** from this table. TouchOut can be any other free GP pin.
 
-| Board TX pin (sensor RX) | Board RX pin (sensor TX) |
+| Sensor RX wire goes to | Sensor TX wire goes to |
 |---|---|
 | GP0 | GP1 (this is the default) |
 | GP4 | GP5 |
@@ -117,10 +117,12 @@ The RP2040 chip can only do serial (TX/RX) on certain pin pairs. Pick **one pair
 | GP12 | GP13 |
 | GP28 | GP29 |
 
+If your wires are the other way round (sensor TX on GP8, sensor RX on GP9), swap the two wires. No setting can fix that, because the chip cannot send on GP9.
+
 To change them:
 
 1. Open the file `firmware/tiny_touch_unified/main/fingerprint.c` in any text editor (TextEdit works; in Terminal, `open -e firmware/tiny_touch_unified/main/fingerprint.c`).
-2. Near the top you will see these three lines. Change the numbers only.
+2. Near the top you will see these three lines. Change the numbers only. `FP_TX_PIN` is the pin the sensor's **RX** wire goes to, `FP_RX_PIN` is the pin the sensor's **TX** wire goes to, and `FP_INT_PIN` is TouchOut.
 
 ```c
 #define FP_TX_PIN 0
@@ -128,7 +130,7 @@ To change them:
 #define FP_INT_PIN 2
 ```
 
-   For example, GP8/GP9 with TouchOut on GP10 becomes `8`, `9`, `10`.
+   For example, sensor RX on GP8, sensor TX on GP9, TouchOut on GP3 becomes `8`, `9`, `3`.
 
 3. Save the file, then build again (Part 2). If you picked a pair that the chip cannot do, the build stops and prints a message that lists the valid pairs, so you cannot accidentally make a broken firmware.
 
@@ -137,7 +139,7 @@ If you build on GitHub (Way A) you do not need to edit anything: type the same n
 If you build on your Mac you can also skip editing the file and type the pins on the command line instead:
 
 ```bash
-cd ~/tinyTouch-RP/firmware/tiny_touch_unified && cmake -S . -B build -DPICO_SDK_PATH=$HOME/pico-sdk -DTINYTOUCH_FP_TX_PIN=8 -DTINYTOUCH_FP_RX_PIN=9 -DTINYTOUCH_FP_INT_PIN=10 && cmake --build build --parallel
+cd ~/tinyTouch-RP/firmware/tiny_touch_unified && cmake -S . -B build -DPICO_SDK_PATH=$HOME/pico-sdk -DTINYTOUCH_FP_TX_PIN=8 -DTINYTOUCH_FP_RX_PIN=9 -DTINYTOUCH_FP_INT_PIN=3 && cmake --build build --parallel
 ```
 
 ## Part 4: Put the firmware on the board

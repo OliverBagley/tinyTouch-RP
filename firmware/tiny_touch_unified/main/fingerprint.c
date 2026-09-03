@@ -24,10 +24,12 @@
 #define FP_INT_PIN 2
 #endif
 #define UART_INDEX_FOR_PIN(pin) (((((pin) / 4) & 1) ^ (((pin) / 8) & 1)))
-_Static_assert(FP_TX_PIN % 4 == 0, "FP_TX_PIN must be a UART TX pin: GP0, GP4, GP8, GP12, or GP28");
-_Static_assert(FP_RX_PIN % 4 == 1, "FP_RX_PIN must be a UART RX pin: GP1, GP5, GP9, GP13, or GP29");
+_Static_assert(FP_TX_PIN % 4 == 0,
+               "FP_TX_PIN (the pin the sensor's RX wire goes to) must be GP0, GP4, GP8, GP12, or GP28");
+_Static_assert(FP_RX_PIN % 4 == 1,
+               "FP_RX_PIN (the pin the sensor's TX wire goes to) must be GP1, GP5, GP9, GP13, or GP29");
 _Static_assert(UART_INDEX_FOR_PIN(FP_TX_PIN) == UART_INDEX_FOR_PIN(FP_RX_PIN),
-               "TX and RX must be a pair from the same UART: GP0/GP1, GP4/GP5, GP8/GP9, GP12/GP13, or GP28/GP29");
+               "The two UART pins must be a pair: GP0/GP1, GP4/GP5, GP8/GP9, GP12/GP13, or GP28/GP29");
 _Static_assert(FP_INT_PIN != FP_TX_PIN && FP_INT_PIN != FP_RX_PIN, "FP_INT_PIN must not reuse a UART pin");
 #define FP_UART (UART_INDEX_FOR_PIN(FP_TX_PIN) ? uart1 : uart0)
 static const int INT_ACTIVE_VALUE = 1;

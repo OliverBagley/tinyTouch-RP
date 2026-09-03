@@ -6,16 +6,16 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      fp_tx_pin:
-        description: "Board pin wired to the sensor RX (GP number: 0, 4, 8, 12, or 28)"
+      sensor_tx_pin:
+        description: "GP number the sensor's TX wire is connected to (1, 5, 9, 13, or 29)"
         required: false
         default: ""
-      fp_rx_pin:
-        description: "Board pin wired to the sensor TX (GP number: 1, 5, 9, 13, or 29)"
+      sensor_rx_pin:
+        description: "GP number the sensor's RX wire is connected to (0, 4, 8, 12, or 28)"
         required: false
         default: ""
-      fp_int_pin:
-        description: "Board pin wired to the sensor TouchOut (any free GP number)"
+      touch_out_pin:
+        description: "GP number the sensor's TouchOut wire is connected to (any free pin)"
         required: false
         default: ""
 
@@ -49,17 +49,22 @@ jobs:
         run: openssl genrsa -out firmware/tiny_touch_unified/secure_boot_signing_key.pem 3072 2>/dev/null
       - name: Build factory firmware
         env:
-          FP_TX_PIN: ${{ inputs.fp_tx_pin }}
-          FP_RX_PIN: ${{ inputs.fp_rx_pin }}
-          FP_INT_PIN: ${{ inputs.fp_int_pin }}
+          # The sensor's TX wire lands on the board's RX pin and vice versa.
+          FP_RX_PIN: ${{ inputs.sensor_tx_pin }}
+          FP_TX_PIN: ${{ inputs.sensor_rx_pin }}
+          FP_INT_PIN: ${{ inputs.touch_out_pin }}
         run: |
           pins=()
-          for name in TX RX INT; do
+          for name in RX TX INT; do
             value="$(eval "printf '%s' \"\${FP_${name}_PIN:-}\"")"
             [[ -z "$value" ]] && continue
-            [[ "$value" =~ ^[0-9]+$ ]] || { echo "fp_${name,,}_pin must be a GP number, got: $value" >&2; exit 1; }
+            [[ "$value" =~ ^[0-9]+$ ]] || { echo "Pin inputs must be plain GP numbers, got: $value" >&2; exit 1; }
             pins+=("-DTINYTOUCH_FP_${name}_PIN=$value")
-            echo "Sensor ${name} pin: GP$value"
+            case "$name" in
+              RX) echo "Sensor TX wire on GP$value (board RX)" ;;
+              TX) echo "Sensor RX wire on GP$value (board TX)" ;;
+              INT) echo "Sensor TouchOut wire on GP$value" ;;
+            esac
           done
           cmake -S firmware/tiny_touch_unified -B firmware/tiny_touch_unified/build -G Ninja \
             -DPICO_SDK_PATH="$PWD/pico-sdk" -DCMAKE_BUILD_TYPE=Release "${pins[@]}"
