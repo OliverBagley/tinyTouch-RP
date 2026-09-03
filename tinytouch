@@ -87,6 +87,82 @@ def terminal_style(text: str, code: str) -> str:
     return f"\033[{code}m{text}\033[0m"
 
 
+ENROLLMENT_VIEWS = (
+    ("left", "left edge", "36"),
+    ("right", "right edge", "35"),
+    ("top", "top", "33"),
+    ("center", "center", "32"),
+)
+
+
+def fingerprint_oval(active: str) -> str:
+    """Draw one stable fingerprint oval with one region highlighted."""
+    rows = (
+        "        ╭───────╮",
+        "     ╭──┤ttttttt├──╮",
+        "   ╭─┤ttttttttttttt├─╮",
+        "  ╭┤lllllcccccrrrrr├╮",
+        " ╭┤llllllcccccrrrrrr├╮",
+        " │lllllllcccccrrrrrrr│",
+        " ╰┤llllllcccccrrrrrr├╯",
+        "  ╰┤lllllcccccrrrrr├╯",
+        "   ╰─┤lllcccccrrr├─╯",
+        "     ╰──┤ccccc├──╯",
+        "        ╰─────╯",
+    )
+    zone_for_marker = {"l": "left", "r": "right", "t": "top", "c": "center"}
+    color_for_zone = {view: color for view, _label, color in ENROLLMENT_VIEWS}
+    color_enabled = (
+        sys.stdout.isatty()
+        and os.environ.get("NO_COLOR") is None
+        and os.environ.get("TERM") != "dumb"
+    )
+    rendered = []
+    for row in rows:
+        line = []
+        for character in row:
+            zone = zone_for_marker.get(character)
+            if zone is None:
+                line.append(character)
+            elif zone == active:
+                mark = "█" if color_enabled else "#"
+                line.append(terminal_style(mark, f"1;{color_for_zone[zone]}"))
+            else:
+                line.append(terminal_style("·", "2"))
+        rendered.append("".join(line))
+    return "\n".join(rendered)
+
+
+def command_enroll_demo(_args: argparse.Namespace) -> None:
+    """Preview fingerprint enrollment without opening a device."""
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        raise ToolError("The enrollment demo needs an interactive Terminal.")
+    view_index = 0
+    previous = tty.tcgetattr(sys.stdin.fileno()) if hasattr(tty, "tcgetattr") else None
+    try:
+        tty.setraw(sys.stdin.fileno())
+        while True:
+            zone, label, _color = ENROLLMENT_VIEWS[view_index]
+            sys.stdout.write("\033[2J\033[H")
+            say(terminal_style("Fingerprint enrollment", "1"))
+            say(f"View {view_index + 1} of {len(ENROLLMENT_VIEWS)}")
+            say("")
+            say(fingerprint_oval(zone))
+            say("")
+            say(f"Tap the sensor with the {terminal_style(label, '1')} of your finger.")
+            say(terminal_style("Tab: next    q: exit", "2"))
+            key = os.read(sys.stdin.fileno(), 1)
+            if key in {b"q", b"Q", b"\x03", b"\x1b", b"\r", b"\n"}:
+                break
+            if key == b"\t":
+                view_index = (view_index + 1) % len(ENROLLMENT_VIEWS)
+    finally:
+        if previous is not None:
+            tty.tcsetattr(sys.stdin.fileno(), tty.TCSADRAIN, previous)
+        sys.stdout.write("\033[2J\033[H")
+        sys.stdout.flush()
+
+
 def show_startup_mark(command: str) -> None:
     """Show the original Alpaca mark and one command section divider."""
     if not sys.stdout.isatty():
@@ -781,8 +857,7 @@ def enroll(port: str, skip: bool) -> None:
             raise ToolError("Fingerprint enrollment was not changed.")
     say("")
     unlock(port, reason="start fingerprint enrollment")
-    views = ("left edge", "right edge", "top", "center")
-    for slot, view in enumerate(views, 1):
+    for slot, (_zone, view, _color) in enumerate(ENROLLMENT_VIEWS, 1):
         say("")
         serial_command(
             port,
@@ -1480,6 +1555,8 @@ def parser() -> argparse.ArgumentParser:
     pair.set_defaults(func=command_pair)
     hid_smoke = sub.add_parser("hid-smoke")
     hid_smoke.set_defaults(func=command_hid_smoke)
+    enroll_demo = sub.add_parser("enroll-demo", help=argparse.SUPPRESS)
+    enroll_demo.set_defaults(func=command_enroll_demo)
     return parser
 
 
