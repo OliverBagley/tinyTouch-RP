@@ -297,7 +297,7 @@ class ProtocolSixTests(unittest.TestCase):
             mock.patch.object(cli, "protocol6"),
             mock.patch.object(cli, "sensor_ready"),
             mock.patch.object(cli, "unlock") as unlock,
-            mock.patch.object(cli, "serial_command"),
+            mock.patch.object(cli, "serial_command") as command,
             mock.patch.object(
                 cli, "wait_for_piv_identities", return_value=identities
             ) as wait,
@@ -309,7 +309,11 @@ class ProtocolSixTests(unittest.TestCase):
             cli.command_setup(args)
         self.assertNotIn("explain_pin", unlock.call_args.kwargs)
         self.assertEqual(wait.call_args.kwargs["timeout"], 30.0)
-        self.assertIn("Creating PIV identities", wait.call_args.kwargs["message"])
+        create_call = next(
+            call for call in command.call_args_list if call.args[1] == "PIV CREATE"
+        )
+        self.assertIn("Creating PIV identities", create_call.kwargs["wait_message"])
+        self.assertIn("Waiting for macOS", wait.call_args.kwargs["message"])
         self.assertTrue(pair.call_args.kwargs["separate_identity_list"])
         self.assertIn(
             "tinyTouch is ready in PIV mode.",

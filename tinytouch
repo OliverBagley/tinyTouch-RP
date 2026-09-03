@@ -370,32 +370,49 @@ def exchange_serial(
     device, command: str, *, timeout: float, touch_prompt: str | None = None,
     lift_prompt: str | None = "Lift your finger from the sensor.",
     touch_again_prompt: str | None = None,
+    wait_message: str | None = None,
 ) -> list[str]:
     lines: list[str] = []
     touch_prompted = False
     device.write((command + "\n").encode("ascii"))
     device.flush()
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        raw = device.readline()
-        if not raw:
-            continue
-        line = raw.decode("utf-8", "replace").strip()
-        if not line:
-            continue
-        lines.append(line)
-        verbose("device: " + line)
-        if line == "EVENT TOUCH" and not touch_prompted:
-            say(touch_prompt or "Touch the fingerprint sensor now.")
-            touch_prompted = True
-        elif line == "EVENT LIFT" and lift_prompt:
-            say(lift_prompt)
-        elif line == "EVENT TOUCH_AGAIN":
-            if touch_prompt:
-                say("")
-            say(touch_again_prompt or "Touch the same finger again now.")
-        if is_terminal(command, line):
-            break
+    frames = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+    animated_wait = bool(wait_message and sys.stdout.isatty())
+    if wait_message and not animated_wait:
+        say(wait_message)
+    frame = 0
+    try:
+        while time.monotonic() < deadline:
+            if animated_wait:
+                print(
+                    f"\r{frames[frame % len(frames)]} {wait_message}",
+                    end="",
+                    flush=True,
+                )
+                frame += 1
+            raw = device.readline()
+            if not raw:
+                continue
+            line = raw.decode("utf-8", "replace").strip()
+            if not line:
+                continue
+            lines.append(line)
+            verbose("device: " + line)
+            if line == "EVENT TOUCH" and not touch_prompted:
+                say(touch_prompt or "Touch the fingerprint sensor now.")
+                touch_prompted = True
+            elif line == "EVENT LIFT" and lift_prompt:
+                say(lift_prompt)
+            elif line == "EVENT TOUCH_AGAIN":
+                if touch_prompt:
+                    say("")
+                say(touch_again_prompt or "Touch the same finger again now.")
+            if is_terminal(command, line):
+                break
+    finally:
+        if animated_wait:
+            print("\r\033[2K", end="", flush=True)
     if not lines or not is_terminal(command, lines[-1]):
         raise SerialTimeout(f"tinyTouch did not acknowledge {command.split()[0]}.")
     if lines[-1].startswith("ERR "):
@@ -451,12 +468,14 @@ def serial_command(
     touch_prompt: str | None = None,
     lift_prompt: str | None = "Lift your finger from the sensor.",
     touch_again_prompt: str | None = None,
+    wait_message: str | None = None,
 ) -> list[str]:
     if _active_serial is not None:
         try:
             return exchange_serial(
                 _active_serial, command, timeout=timeout, touch_prompt=touch_prompt,
                 lift_prompt=lift_prompt, touch_again_prompt=touch_again_prompt,
+                wait_message=wait_message,
             )
         except Exception as exc:
             if "Device not configured" in str(exc):
@@ -470,6 +489,7 @@ def serial_command(
             return exchange_serial(
                 _active_serial, command, timeout=timeout, touch_prompt=touch_prompt,
                 lift_prompt=lift_prompt, touch_again_prompt=touch_again_prompt,
+                wait_message=wait_message,
             )
     except Exception as exc:
         if "Device not configured" in str(exc):
@@ -786,7 +806,15 @@ def command_setup(args: argparse.Namespace) -> None:
                     port,
                     reason="create your PIV identity",
                 )
-                serial_command(port, "PIV CREATE", timeout=45)
+                serial_command(
+                    port,
+                    "PIV CREATE",
+                    timeout=45,
+                    wait_message=(
+                        "Creating PIV identities. This may take up to 30 seconds. "
+                        "Please do not touch the sensor."
+                    ),
+                )
                 piv_rescan_needed = True
         if not mode_changed and not piv_rescan_needed:
             enroll(port, args.skip_enroll)
@@ -813,7 +841,7 @@ def command_setup(args: argparse.Namespace) -> None:
         created_piv_identities = wait_for_piv_identities(
             timeout=30.0,
             message=(
-                "Creating PIV identities. This may take up to 30 seconds. "
+                "Waiting for macOS to discover your PIV identity. "
                 "Please do not touch the sensor."
             ),
         )
@@ -1176,7 +1204,7 @@ def command_update(args: argparse.Namespace) -> None:
     stage_ota(port, image, digest)
     notify("tinyTouch update staged", "Unplug tinyTouch, reconnect it, then run tinytouch status.")
     say("OTA firmware is staged in the inactive slot.")
-    say("Unplug tinyTouch and reconnect it once to boot the new firmware, then run 'tinytouch status'.")
+    say("Unplug tinyTouch and reconnect it once to boot the new firmware.")
 
 
 def command_rom(args: argparse.Namespace) -> None:
