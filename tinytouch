@@ -98,17 +98,22 @@ ENROLLMENT_VIEWS = (
 def fingerprint_oval(active: str) -> str:
     """Draw one stable fingerprint oval with one region highlighted."""
     rows = (
-        "        ╭───────╮",
-        "     ╭──┤ttttttt├──╮",
-        "   ╭─┤ttttttttttttt├─╮",
-        "  ╭┤lllllcccccrrrrr├╮",
-        " ╭┤llllllcccccrrrrrr├╮",
-        " │lllllllcccccrrrrrrr│",
-        " ╰┤llllllcccccrrrrrr├╯",
-        "  ╰┤lllllcccccrrrrr├╯",
-        "   ╰─┤lllcccccrrr├─╯",
-        "     ╰──┤ccccc├──╯",
-        "        ╰─────╯",
+        "       _______",
+        "     /ttttttttt\\",
+        "    /ttttttttttt\\",
+        "   /ttttttttttttt\\",
+        "  /lllllcccccrrrrr\\",
+        " |llllllcccccrrrrrr|",
+        " |llllllcccccrrrrrr|",
+        " |llllllcccccrrrrrr|",
+        " |llllllcccccrrrrrr|",
+        " |llllllcccccrrrrrr|",
+        " |llllllcccccrrrrrr|",
+        "  \\lllllcccccrrrrr/",
+        "   \\llllcccccrrrr/",
+        "    \\lllcccccrrr/",
+        "     \\llcccccrr/",
+        "       ‾‾‾‾‾‾‾",
     )
     zone_for_marker = {"l": "left", "r": "right", "t": "top", "c": "center"}
     color_for_zone = {view: color for view, _label, color in ENROLLMENT_VIEWS}
@@ -128,7 +133,7 @@ def fingerprint_oval(active: str) -> str:
                 mark = "█" if color_enabled else "#"
                 line.append(terminal_style(mark, f"1;{color_for_zone[zone]}"))
             else:
-                line.append(terminal_style("·", "2"))
+                line.append(" ")
         rendered.append("".join(line))
     return "\n".join(rendered)
 
@@ -140,7 +145,7 @@ def command_enroll_demo(_args: argparse.Namespace) -> None:
     view_index = 0
     previous = tty.tcgetattr(sys.stdin.fileno()) if hasattr(tty, "tcgetattr") else None
     try:
-        tty.setraw(sys.stdin.fileno())
+        tty.setcbreak(sys.stdin.fileno())
         while True:
             zone, label, _color = ENROLLMENT_VIEWS[view_index]
             sys.stdout.write("\033[2J\033[H")
