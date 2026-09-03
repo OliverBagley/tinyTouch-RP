@@ -1,6 +1,6 @@
 # Recovery
 
-Recovery erases fingerprints, keys, pairings, settings, and firmware state.
+Recovery reinstalls the factory firmware and clears fingerprints, keys, pairings, and settings.
 
 Try this first:
 
@@ -9,7 +9,7 @@ tinytouch status --verbose
 tinytouch factory-reset
 ```
 
-If the device still cannot be set up, open the [Flash center](/flash), choose **Recovery**, and follow the steps. Recovery erases flash and writes the signed factory image. You need Chrome or Edge, a USB data cable, and access to **BOOT** and **RESET**.
+If the device still cannot be set up, hold **BOOT** while reconnecting it so the **RPI-RP2** drive appears, then open the [Flash center](/flash), download the factory UF2, and copy it onto the drive. You need a USB data cable and access to **BOOT** and **RESET**.
 
 After recovery, unplug and reconnect the device, wait 20 seconds, then run:
 
@@ -17,4 +17,4 @@ After recovery, unplug and reconnect the device, wait 20 seconds, then run:
 tinytouch setup
 ```
 
-See the [Recovery reference](/reference/recovery) for details.
+See the [Recovery reference](/reference/recovery) for details, including how to erase all stored keys first.

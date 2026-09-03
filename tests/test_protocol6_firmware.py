@@ -12,29 +12,27 @@ class ProtocolSixFirmwareTests(unittest.TestCase):
     def test_no_firmware_software_restart_path(self) -> None:
         source = "\n".join(path.read_text() for path in MAIN.glob("*.c"))
         self.assertNotIn("esp_restart", source)
-        self.assertNotIn("RTC_CNTL_FORCE_DOWNLOAD_BOOT", source)
+        self.assertNotIn("watchdog_reboot", source)
+        self.assertNotIn("reset_usb_boot", source)
 
     def test_protocol_six_has_one_stable_usb_descriptor(self) -> None:
-        cmake = self.source("CMakeLists.txt")
-        usb = self.source("usb_ccid.c")
+        cmake = (MAIN.parent / "CMakeLists.txt").read_text()
         descriptors = self.source("usb_descriptors.c")
         self.assertIn("TINYTOUCH_PROTOCOL_VERSION=6", cmake)
-        self.assertIn("tiny_touch_configuration_descriptor", usb)
+        self.assertIn("return tiny_touch_configuration_descriptor;", descriptors)
         self.assertNotIn("tiny_touch_hid_configuration_descriptor", descriptors)
         self.assertNotIn("tiny_touch_piv_configuration_descriptor", descriptors)
 
     def test_usb_resume_reenumerates_without_restarting_firmware(self) -> None:
-        defaults = (MAIN.parent / "sdkconfig.defaults").read_text()
         usb = self.source("usb_ccid.c")
-        self.assertIn("CONFIG_TINYUSB_RESUME_CALLBACK=y", defaults)
-        self.assertIn("TINYUSB_EVENT_RESUMED", usb)
+        self.assertIn("void tud_resume_cb(void)", usb)
         self.assertIn("resume_reconnect_task", usb)
         self.assertIn("tud_disconnect();", usb)
         self.assertIn("tud_connect();", usb)
 
     def test_persistence_swaps_one_live_config_blob(self) -> None:
         source = self.source("device_config.c")
-        self.assertIn('CONFIG_NAMESPACE "tt6"', source)
+        self.assertIn("storage_write(STORAGE_CONFIG", source)
         self.assertIn("replace_locked", source)
         self.assertIn("device_config_factory_reset", source)
         self.assertNotIn('"hid_key"', source)
@@ -50,9 +48,13 @@ class ProtocolSixFirmwareTests(unittest.TestCase):
     def test_ota_stages_without_changing_the_current_runtime(self) -> None:
         console = self.source("config_console.c")
         update = self.source("firmware_update.c")
+        main = self.source("main.c")
         self.assertIn("OK OTA STAGED power_cycle=required", console)
-        self.assertIn("esp_ota_set_boot_partition", update)
+        self.assertIn("stage_update_marker", update)
         self.assertIn("firmware_update_staged", update)
+        # The staged image is installed by the next boot, never by the running session.
+        self.assertIn("firmware_update_apply_pending();", main)
+        self.assertNotIn("install_staged(", console)
         self.assertIn('strcmp(command, "OTA ABORT") == 0', console)
         self.assertNotIn("fingerprint_prepare_for_restart", console)
 
@@ -80,7 +82,7 @@ class ProtocolSixFirmwareTests(unittest.TestCase):
         piv = self.source("piv.c")
         console = self.source("config_console.c")
         self.assertIn("set_chuid_guid(cert_9a_der, cert_9a_der_len)", piv)
-        self.assertIn("set_chuid_guid(mac, sizeof(mac))", piv)
+        self.assertIn("set_chuid_guid(board, sizeof(board))", piv)
         self.assertIn("usb_ccid_rescan();", console)
 
     def test_piv_configuration_allows_bounded_keychain_wrapping(self) -> None:
@@ -115,12 +117,27 @@ class ProtocolSixFirmwareTests(unittest.TestCase):
 
     def test_development_auth_bypass_is_explicitly_opt_in(self) -> None:
         project = (MAIN.parent / "CMakeLists.txt").read_text()
-        component = self.source("CMakeLists.txt")
         console = self.source("config_console.c")
         self.assertIn("option(TINYTOUCH_DEVELOPMENT_SKIP_FINGERPRINT_AUTH", project)
         self.assertIn("OFF)", project)
-        self.assertIn("if(TINYTOUCH_DEVELOPMENT_SKIP_FINGERPRINT_AUTH)", component)
+        self.assertIn("if(TINYTOUCH_DEVELOPMENT_SKIP_FINGERPRINT_AUTH)", project)
         self.assertIn("#ifdef TINYTOUCH_DEVELOPMENT_SKIP_FINGERPRINT_AUTH", console)
+
+    def test_ota_images_are_signature_checked_before_staging(self) -> None:
+        update = self.source("firmware_update.c")
+        project = (MAIN.parent / "CMakeLists.txt").read_text()
+        self.assertIn("TINYTOUCH_SIGNING_PUBLIC_KEY_PEM", update)
+        self.assertIn("mbedtls_pk_verify", update)
+        self.assertLess(update.index("signature_valid(expected_size)"),
+                        update.index("stage_update_marker()"))
+        self.assertIn("openssl dgst -sha256 -sign", project)
+        self.assertIn("secure_boot_signing_key.pem", project)
+
+    def test_piv_commands_run_off_the_usb_task(self) -> None:
+        usb = self.source("usb_ccid.c")
+        self.assertIn("xTaskNotifyGive(apdu_task_handle)", usb)
+        self.assertIn("CCID_TIME_EXTENSION_MS", usb)
+        self.assertIn("watchdog_update();", usb)
 
 
 if __name__ == "__main__":

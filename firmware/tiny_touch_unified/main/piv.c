@@ -2,22 +2,18 @@
 
 #include <string.h>
 
-#include "esp_random.h"
-#include "esp_log.h"
-#include "esp_mac.h"
+#include "FreeRTOS.h"
 #include "fingerprint.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
-#include "freertos/task.h"
 #include "mbedtls/pk.h"
 #include "mbedtls/rsa.h"
 #include "mbedtls/sha256.h"
 #include "mbedtls/oid.h"
 #include "mbedtls/x509_crt.h"
-#include "nvs.h"
+#include "platform.h"
+#include "semphr.h"
+#include "storage.h"
+#include "task.h"
 #include "touch_pin_hid.h"
-
-static const char *TAG = "piv";
 
 static const uint8_t PIV_AID[] = {0xa0, 0x00, 0x00, 0x03, 0x08, 0x00, 0x00, 0x10, 0x00};
 static const uint8_t PIV_AID_VERSIONED[] = {0xa0, 0x00, 0x00, 0x03, 0x08, 0x00, 0x00, 0x10, 0x00, 0x01, 0x00};
@@ -63,10 +59,16 @@ static uint8_t cert_9a_der[1536];
 static size_t cert_9a_der_len;
 static uint8_t cert_9d_der[1536];
 static size_t cert_9d_der_len;
-static char stored_cert_9a[1800];
-static char stored_key_9a[2400];
-static char stored_cert_9d[1800];
-static char stored_key_9d[2400];
+// One flash record holds the whole identity so it is present or absent as a
+// unit. Buffers are static: the PEM blocks are too large for a task stack.
+typedef struct {
+  uint8_t schema;
+  char cert_9a[1800];
+  char key_9a[2400];
+  char cert_9d[1800];
+  char key_9d[2400];
+} piv_identity_record_t;
+static piv_identity_record_t stored;
 static bool using_provisioned_keys;
 static uint8_t pending_response[1800];
 static size_t pending_response_len;
@@ -117,10 +119,11 @@ static void set_chuid_guid(const uint8_t *identity, size_t identity_len) {
 }
 
 static void wipe_stored_identity(void) {
-  secure_wipe(stored_cert_9a, sizeof(stored_cert_9a));
-  secure_wipe(stored_key_9a, sizeof(stored_key_9a));
-  secure_wipe(stored_cert_9d, sizeof(stored_cert_9d));
-  secure_wipe(stored_key_9d, sizeof(stored_key_9d));
+  secure_wipe(&stored, sizeof(stored));
+}
+
+static bool stored_string_valid(const char *value, size_t capacity) {
+  return strnlen(value, capacity) < capacity;
 }
 
 static bool load_certificate_for_key(const char *pem, mbedtls_pk_context *key,
@@ -143,14 +146,6 @@ static bool load_certificate_for_key(const char *pem, mbedtls_pk_context *key,
   return valid;
 }
 
-static bool load_nvs_string(nvs_handle_t handle, const char *name, char *out, size_t cap) {
-  size_t length = cap;
-  esp_err_t result = nvs_get_blob(handle, name, out, &length);
-  if (result != ESP_OK || length == 0 || length > cap) return false;
-  out[cap - 1] = '\0';
-  return true;
-}
-
 static void reset_key_contexts(void) {
   if (piv_keys_initialized) {
     mbedtls_pk_free(&auth_key);
@@ -170,11 +165,6 @@ static void clear_provisioned_identity(void) {
   using_provisioned_keys = false;
 }
 
-static bool write_identity_part(nvs_handle_t handle, const char *name,
-                                const char *value) {
-  return nvs_set_blob(handle, name, value, strlen(value) + 1) == ESP_OK;
-}
-
 static bool create_certificate(mbedtls_pk_context *key, char *output,
                                size_t output_size, bool key_management) {
   uint8_t serial_bytes[16];
@@ -189,7 +179,7 @@ static bool create_certificate(mbedtls_pk_context *key, char *output,
   };
   mbedtls_x509write_cert certificate;
   mbedtls_x509write_crt_init(&certificate);
-  esp_fill_random(serial_bytes, sizeof(serial_bytes));
+  fill_random(serial_bytes, sizeof(serial_bytes));
   int result = 0;
   mbedtls_x509write_crt_set_subject_key(&certificate, key);
   mbedtls_x509write_crt_set_issuer_key(&certificate, key);
@@ -240,20 +230,13 @@ bool piv_create_identity(void) {
   // RSA creation needs a worker task. Keep PEM output in static storage so
   // the task does not overflow its stack with four multi-kilobyte buffers.
   wipe_stored_identity();
-  bool ok = create_key_and_certificate(stored_key_9a, sizeof(stored_key_9a),
-                                       stored_cert_9a, sizeof(stored_cert_9a), false) &&
-            create_key_and_certificate(stored_key_9d, sizeof(stored_key_9d),
-                                       stored_cert_9d, sizeof(stored_cert_9d), true);
-  nvs_handle_t handle;
-  if (ok && nvs_open("piv_keys", NVS_READWRITE, &handle) == ESP_OK) {
-    ok = write_identity_part(handle, "cert9a", stored_cert_9a) &&
-         write_identity_part(handle, "key9a", stored_key_9a) &&
-         write_identity_part(handle, "cert9d", stored_cert_9d) &&
-         write_identity_part(handle, "key9d", stored_key_9d) &&
-         nvs_set_u8(handle, "schema", PIV_IDENTITY_SCHEMA) == ESP_OK && nvs_commit(handle) == ESP_OK;
-    nvs_close(handle);
-  } else {
-    ok = false;
+  bool ok = create_key_and_certificate(stored.key_9a, sizeof(stored.key_9a),
+                                       stored.cert_9a, sizeof(stored.cert_9a), false) &&
+            create_key_and_certificate(stored.key_9d, sizeof(stored.key_9d),
+                                       stored.cert_9d, sizeof(stored.cert_9d), true);
+  if (ok) {
+    stored.schema = PIV_IDENTITY_SCHEMA;
+    ok = storage_write(STORAGE_PIV, &stored, sizeof(stored));
   }
   wipe_stored_identity();
   if (!ok) return false;
@@ -438,7 +421,7 @@ static bool parse_dynamic_auth(const uint8_t *buf, size_t buf_len,
 
 static int piv_rng(void *ctx, unsigned char *out, size_t len) {
   (void)ctx;
-  esp_fill_random(out, len);
+  fill_random(out, len);
   return 0;
 }
 
@@ -652,7 +635,7 @@ static bool handle_general_authenticate(const uint8_t *apdu, size_t apdu_len,
   mbedtls_rsa_context *rsa = mbedtls_pk_rsa(*key);
   int rc = mbedtls_rsa_private(rsa, piv_rng, NULL, challenge, sig);
   if (rc != 0) {
-    ESP_LOGE(TAG, "sign failed: -0x%x", -rc);
+    LOGE("sign failed: -0x%x", -rc);
     return append_sw(response, response_len, response_cap, 0x6f00);
   }
 
@@ -674,39 +657,34 @@ static bool handle_general_authenticate(const uint8_t *apdu, size_t apdu_len,
 void piv_init(void) {
   if (!piv_mutex) piv_mutex = xSemaphoreCreateMutex();
   configASSERT(piv_mutex);
-  uint8_t mac[6];
-  if (esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK) {
-    // Give an unconfigured board a stable temporary token identifier. Once an
-    // identity exists, its authentication certificate becomes the identifier.
-    set_chuid_guid(mac, sizeof(mac));
-  }
+  // Give an unconfigured board a stable temporary token identifier. Once an
+  // identity exists, its authentication certificate becomes the identifier.
+  uint8_t board[6];
+  board_id(board);
+  set_chuid_guid(board, sizeof(board));
 
   const char *cert_9a_pem = NULL;
   const char *key_9a_pem = NULL;
   const char *cert_9d_pem = NULL;
   const char *key_9d_pem = NULL;
   clear_provisioned_identity();
-  bool have_provisioned_material = false;
-  nvs_handle_t nvs_handle;
-  if (nvs_open("piv_keys", NVS_READONLY, &nvs_handle) == ESP_OK) {
-    uint8_t schema = 0;
-    have_provisioned_material = nvs_get_u8(nvs_handle, "schema", &schema) == ESP_OK &&
-      schema == PIV_IDENTITY_SCHEMA &&
-      load_nvs_string(nvs_handle, "cert9a", stored_cert_9a, sizeof(stored_cert_9a)) &&
-      load_nvs_string(nvs_handle, "key9a", stored_key_9a, sizeof(stored_key_9a)) &&
-      load_nvs_string(nvs_handle, "cert9d", stored_cert_9d, sizeof(stored_cert_9d)) &&
-      load_nvs_string(nvs_handle, "key9d", stored_key_9d, sizeof(stored_key_9d));
-    nvs_close(nvs_handle);
-    if (have_provisioned_material) {
-      cert_9a_pem = stored_cert_9a;
-      key_9a_pem = stored_key_9a;
-      cert_9d_pem = stored_cert_9d;
-      key_9d_pem = stored_key_9d;
-    }
+  size_t stored_length = 0;
+  bool have_provisioned_material =
+      storage_read(STORAGE_PIV, &stored, sizeof(stored), &stored_length) &&
+      stored_length == sizeof(stored) && stored.schema == PIV_IDENTITY_SCHEMA &&
+      stored_string_valid(stored.cert_9a, sizeof(stored.cert_9a)) &&
+      stored_string_valid(stored.key_9a, sizeof(stored.key_9a)) &&
+      stored_string_valid(stored.cert_9d, sizeof(stored.cert_9d)) &&
+      stored_string_valid(stored.key_9d, sizeof(stored.key_9d));
+  if (have_provisioned_material) {
+    cert_9a_pem = stored.cert_9a;
+    key_9a_pem = stored.key_9a;
+    cert_9d_pem = stored.cert_9d;
+    key_9d_pem = stored.key_9d;
   }
 
   if (!have_provisioned_material) {
-    ESP_LOGI(TAG, "PIV identity is unconfigured");
+    LOGI("PIV identity is unconfigured");
     wipe_stored_identity();
     return;
   }
@@ -717,7 +695,7 @@ void piv_init(void) {
   bool auth_ok = rc == 0 && mbedtls_pk_get_type(&auth_key) == MBEDTLS_PK_RSA &&
                  mbedtls_pk_get_bitlen(&auth_key) == 2048;
   if (!auth_ok) {
-    ESP_LOGW(TAG, "provisioned auth private key could not be loaded");
+    LOGW("provisioned auth private key could not be loaded");
   }
 
   rc = mbedtls_pk_parse_key(&key_mgmt_key,
@@ -728,7 +706,7 @@ void piv_init(void) {
                      mbedtls_pk_get_type(&key_mgmt_key) == MBEDTLS_PK_RSA &&
                      mbedtls_pk_get_bitlen(&key_mgmt_key) == 2048;
   if (!key_mgmt_ok) {
-    ESP_LOGW(TAG, "provisioned key-management private key could not be loaded");
+    LOGW("provisioned key-management private key could not be loaded");
   }
 
   bool cert_9a_ok = auth_ok && load_certificate_for_key(
@@ -744,7 +722,7 @@ void piv_init(void) {
   }
   wipe_stored_identity();
   if (!using_provisioned_keys) {
-    ESP_LOGW(TAG, "provisioned PIV material is incomplete or unusable");
+    LOGW("provisioned PIV material is incomplete or unusable");
     // Credential readiness is aggregate. Never retain a usable key or
     // certificate from one slot when any member of the provisioned identity
     // failed validation.

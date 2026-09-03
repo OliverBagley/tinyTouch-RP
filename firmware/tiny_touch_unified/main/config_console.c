@@ -5,18 +5,18 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
-#include "freertos/task.h"
+#include "FreeRTOS.h"
 #include "mbedtls/base64.h"
-#include "nvs_flash.h"
+#include "semphr.h"
+#include "task.h"
 #include "tusb.h"
 
 #include "device_config.h"
 #include "fingerprint.h"
 #include "firmware_update.h"
 #include "piv.h"
+#include "platform.h"
+#include "storage.h"
 #include "touch_pin_hid.h"
 #include "usb_ccid.h"
 
@@ -61,7 +61,7 @@ static bool cdc_write_all(const char *data, size_t length, int64_t deadline) {
     }
 
     tud_cdc_write_flush();
-    if (esp_timer_get_time() >= deadline) return false;
+    if (now_us() >= deadline) return false;
     vTaskDelay(pdMS_TO_TICKS(1));
   }
   return true;
@@ -70,7 +70,7 @@ static bool cdc_write_all(const char *data, size_t length, int64_t deadline) {
 void config_console_send_line(const char *line) {
   if (!line) return;
   if (write_lock) xSemaphoreTake(write_lock, portMAX_DELAY);
-  int64_t deadline = esp_timer_get_time() + CDC_WRITE_TIMEOUT_US;
+  int64_t deadline = now_us() + CDC_WRITE_TIMEOUT_US;
   bool sent = cdc_write_all(line, strlen(line), deadline);
   if (sent) cdc_write_all("\r\n", 2, deadline);
   if (write_lock) xSemaphoreGive(write_lock);
@@ -102,7 +102,7 @@ static bool parse_u32(const char *text, uint32_t maximum, uint32_t *value) {
   return true;
 }
 
-static bool authorized(void) { return esp_timer_get_time() < authorized_until; }
+static bool authorized(void) { return now_us() < authorized_until; }
 
 static bool require_authorized(void) {
   if (authorized()) return true;
@@ -121,7 +121,7 @@ static void enroll_prompt(const char *state) {
 static void authorize(void) {
 #ifdef TINYTOUCH_DEVELOPMENT_SKIP_FINGERPRINT_AUTH
   // This symbol exists only in an explicitly opted-in local CMake build.
-  authorized_until = esp_timer_get_time() + AUTH_WINDOW_US;
+  authorized_until = now_us() + AUTH_WINDOW_US;
   reply("OK AUTH development=unlocked");
   return;
 #endif
@@ -129,7 +129,7 @@ static void authorize(void) {
   if (count < 0) { reply("ERR AUTH sensor=offline"); return; }
   bool ok = count == 0 || (count > 0 && fingerprint_authorize_prompted(touch_prompt));
   if (!ok) { reply("ERR AUTH no_match"); return; }
-  authorized_until = esp_timer_get_time() + AUTH_WINDOW_US;
+  authorized_until = now_us() + AUTH_WINDOW_US;
   piv_note_configuration_presence();
   reply(count == 0 ? "OK AUTH first_setup=1" : "OK AUTH");
 }
@@ -237,8 +237,8 @@ static void fingerprint_command(char *arguments) {
 
 static void factory_reset(void) {
   if (!require_authorized()) return;
-  bool ok = fingerprint_delete_all() && nvs_flash_erase() == ESP_OK &&
-            nvs_flash_init() == ESP_OK && device_config_factory_reset();
+  bool ok = fingerprint_delete_all() && storage_erase_all() &&
+            device_config_factory_reset();
   if (ok) {
     piv_reload_keys();
     authorized_until = 0;
@@ -264,7 +264,7 @@ static void piv_create(void) {
   if (!require_authorized()) return;
   if (piv_create_active) { reply("ERR PIV BUSY"); return; }
   piv_create_active = true;
-  BaseType_t created = xTaskCreate(piv_create_task, "piv_create", 10240, NULL, 1, NULL);
+  BaseType_t created = xTaskCreate(piv_create_task, "piv_create", 2560, NULL, 1, NULL);
   if (created != pdPASS) {
     piv_create_active = false;
     reply("ERR PIV CREATE");
@@ -284,7 +284,7 @@ static void usb_reconnect_task(void *argument) {
 static void usb_reconnect(void) {
   if (usb_reconnect_active) { reply("ERR USB BUSY"); return; }
   usb_reconnect_active = true;
-  if (xTaskCreate(usb_reconnect_task, "usb_reconnect", 2048, NULL, 2, NULL) != pdPASS) {
+  if (xTaskCreate(usb_reconnect_task, "usb_reconnect", 512, NULL, 2, NULL) != pdPASS) {
     usb_reconnect_active = false;
     reply("ERR USB RECONNECT");
     return;
@@ -303,7 +303,7 @@ static void ota_begin(char *arguments) {
                                      parse_u32(size, UINT32_MAX, &image_size) &&
                                      decode_hex(digest, hash, sizeof(hash)) &&
                                      firmware_update_begin(image_size, hash); }
-  if (ok) { memcpy(ota_token, arguments, sizeof(ota_token) - 1); ota_last_activity = esp_timer_get_time(); authorized_until = 0; }
+  if (ok) { memcpy(ota_token, arguments, sizeof(ota_token) - 1); ota_last_activity = now_us(); authorized_until = 0; }
   wipe(hash, sizeof(hash)); reply(ok ? "OK OTA BEGIN next=0" : "ERR OTA BEGIN");
 }
 
@@ -317,7 +317,7 @@ static void ota_write(char *arguments) {
             mbedtls_base64_decode(bytes, sizeof(bytes), &length, (const unsigned char *)encoded,
                                   strlen(encoded)) == 0 &&
             firmware_update_write(at, bytes, length);
-  if (ok) ota_last_activity = esp_timer_get_time();
+  if (ok) ota_last_activity = now_us();
   char line[64];
   if (ok) snprintf(line, sizeof(line), "OK OTA WRITE next=%u", (unsigned)firmware_update_written());
   else snprintf(line, sizeof(line), "ERR OTA WRITE");
@@ -359,7 +359,7 @@ static void console_task(void *arg) {
   (void)arg;
   char buffer[1024];
   while (true) {
-    if (ota_token[0] && esp_timer_get_time() - ota_last_activity > OTA_WINDOW_US) {
+    if (ota_token[0] && now_us() - ota_last_activity > OTA_WINDOW_US) {
       firmware_update_abort(); clear_ota();
     }
     bool activity = false;
@@ -378,9 +378,7 @@ static void console_task(void *arg) {
         else command_overflow = true;
       }
     }
-    // The scheduler tick is 10 ms. A 2 ms conversion becomes zero and leaves
-    // this higher-priority loop ready forever, starving app_main before it can
-    // create the background fingerprint task.
+    // Yield one tick when idle so lower-priority tasks always get the CPU.
     if (!activity) vTaskDelay(1);
   }
 }
@@ -388,6 +386,6 @@ static void console_task(void *arg) {
 void config_console_start(void) {
   write_lock = xSemaphoreCreateMutex();
   configASSERT(write_lock);
-  BaseType_t created = xTaskCreate(console_task, "console", 6144, NULL, 3, NULL);
+  BaseType_t created = xTaskCreate(console_task, "console", 1536, NULL, 3, NULL);
   configASSERT(created == pdPASS);
 }

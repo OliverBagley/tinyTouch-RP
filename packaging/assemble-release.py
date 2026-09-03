@@ -7,7 +7,6 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 
@@ -15,39 +14,25 @@ ROOT = Path(__file__).resolve().parent.parent
 VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 PROTOCOL = 6
 SECURE_VERSION = 0
-FLASH_SIZE = 4 * 1024 * 1024
+BOARDS = ["waveshare-rp2040-zero"]
+APP_MAX_BYTES = 992 * 1024
+SIGNATURE_BYTES = 384
 
 
 def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def copy_image(source: Path, destination: Path, name: str, address: int) -> dict:
+def copy_asset(source: Path, destination: Path) -> dict:
     if not source.is_file():
         raise SystemExit(f"missing build artifact: {source}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, destination)
-    size = destination.stat().st_size
-    if address + size > FLASH_SIZE:
-        raise SystemExit(f"{name} does not fit in 4 MB flash at {address:#x}")
     return {
-        "name": name,
         "file": destination.name,
-        "address": address,
-        "size": size,
+        "size": destination.stat().st_size,
         "sha256": digest(destination),
     }
-
-
-def merge(images: list[dict], directory: Path, output: Path) -> None:
-    command = [
-        sys.executable, "-m", "esptool", "--chip", "esp32s3", "merge_bin",
-        "--output", str(output), "--flash_mode", "dio", "--flash_freq", "80m",
-        "--flash_size", "4MB",
-    ]
-    for image in images:
-        command.extend([hex(image["address"]), str(directory / image["file"])])
-    subprocess.run(command, check=True)
 
 
 def require_consistent_asset_names(value: object, seen: dict[str, str] | None = None) -> None:
@@ -81,47 +66,26 @@ def main() -> None:
         shutil.rmtree(output)
     output.mkdir(parents=True)
 
-    layouts = {}
-    specifications = {
-        "factory": (
-            args.firmware_build,
-            [
-                ("Bootloader", "bootloader/bootloader.bin", "bootloader.bin", 0x0),
-                ("Partition table", "partition_table/partition-table.bin", "partition-table.bin", 0x8000),
-                ("Unified firmware", "tiny_touch_unified.bin", "tiny_touch_unified.bin", 0x10000),
-                ("OTA state", "ota_data_initial.bin", "ota_data_initial.bin", 0x210000),
-            ],
-        ),
-    }
-    for kind, (build, files) in specifications.items():
-        directory = output / kind
-        images = [
-            copy_image(build / source, directory / destination, name, address)
-            for name, source, destination, address in files
-        ]
-        full_name = "tiny_touch_factory_full.bin"
-        merge(images, directory, directory / full_name)
-        layouts[kind] = {
-            "version": VERSION,
-            "protocol": PROTOCOL,
-            "secureVersion": SECURE_VERSION,
-            "flashSize": "4MB",
-            "eraseAll": False,
-            "compress": False,
-            "images": images,
-            "fullImage": {
-                "file": full_name,
-                "size": (directory / full_name).stat().st_size,
-                "sha256": digest(directory / full_name),
-            },
-        }
-        (directory / "manifest.json").write_text(
-            json.dumps(layouts[kind], indent=2) + "\n", encoding="utf-8"
-        )
+    ota_source = args.firmware_build / "tiny_touch_unified.signed.bin"
+    if not ota_source.is_file():
+        raise SystemExit(f"missing build artifact: {ota_source}")
+    app_size = ota_source.stat().st_size - SIGNATURE_BYTES
+    if app_size <= 0 or app_size > APP_MAX_BYTES:
+        raise SystemExit(f"application does not fit the {APP_MAX_BYTES} byte flash region")
 
-    built_app = output / "factory" / "tiny_touch_unified.bin"
-    ota_image = output / "tiny_touch_unified.bin"
-    shutil.copy2(built_app, ota_image)
+    factory = output / "factory"
+    image = copy_asset(args.firmware_build / "tiny_touch_unified.uf2",
+                       factory / "tiny_touch_unified.uf2")
+    layout = {
+        "version": VERSION,
+        "protocol": PROTOCOL,
+        "secureVersion": SECURE_VERSION,
+        "board": BOARDS[0],
+        "images": [{"name": "Factory image", "address": 0x0, **image}],
+    }
+    (factory / "manifest.json").write_text(json.dumps(layout, indent=2) + "\n", encoding="utf-8")
+
+    ota = copy_asset(ota_source, output / "tiny_touch_unified.bin")
     build_id = args.build_id or os.environ.get("GITHUB_SHA", "")[:12]
     if not build_id:
         build_id = subprocess.run(
@@ -135,13 +99,9 @@ def main() -> None:
         "build": build_id,
         "protocol": PROTOCOL,
         "secureVersion": SECURE_VERSION,
-        "boards": ["esp32s3-super-mini", "seeed-xiao-esp32s3"],
-        "firmware": layouts,
-        "ota": {
-            "file": ota_image.name,
-            "size": ota_image.stat().st_size,
-            "sha256": digest(ota_image),
-        },
+        "boards": BOARDS,
+        "firmware": {"factory": layout},
+        "ota": ota,
     }
     if args.cli:
         cli_target = output / "tinytouch-macos-arm64.tar.gz"
@@ -158,6 +118,7 @@ def main() -> None:
     (output / "release-manifest.json").write_text(
         json.dumps(release, indent=2) + "\n", encoding="utf-8"
     )
+
 
 if __name__ == "__main__":
     main()

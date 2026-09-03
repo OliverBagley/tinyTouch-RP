@@ -44,6 +44,8 @@ PAIRING_SERVICE = "tinyTouch-pairing"
 PASSWORD_SERVICE = "tinyTouch"
 CURRENT_PROTOCOL = 6
 OTA_CHUNK_SIZE = 3072
+# Two RSA-2048 keys generated in software on a Cortex-M0+.
+PIV_CREATE_TIMEOUT = 900
 OTA_WRITE_WINDOW = 8
 RELEASE_DOWNLOAD_URL = "https://github.com/ZimengXiong/tinyTouch/releases/download"
 LATEST_RELEASE_URL = "https://github.com/ZimengXiong/tinyTouch/releases/latest/download"
@@ -989,7 +991,7 @@ def command_setup(args: argparse.Namespace) -> None:
         else:
             if device.get("piv") != "ready":
                 say("")
-                say("Setting up PIV certificates. This may take up to 30 seconds.")
+                say("Setting up PIV certificates. RSA key generation on the RP2040 can take several minutes.")
                 paired, available = piv_identities()
                 previous_piv_identities = set(paired + available)
                 unlock(
@@ -999,9 +1001,9 @@ def command_setup(args: argparse.Namespace) -> None:
                 serial_command(
                     port,
                     "PIV CREATE",
-                    timeout=45,
+                    timeout=PIV_CREATE_TIMEOUT,
                     wait_message=(
-                        "Creating PIV identities. This may take up to 30 seconds. "
+                        "Creating PIV identities. This can take several minutes. "
                         "Please do not touch the sensor."
                     ),
                 )
@@ -1425,9 +1427,9 @@ def command_update(args: argparse.Namespace) -> None:
 def command_rom(args: argparse.Namespace) -> None:
     if args.port:
         say(f"Selected device: {args.port}")
-    notify("tinyTouch ROM mode", "Unplug tinyTouch, reconnect it in download mode, and flash it.")
-    say("ROM flashing requires a physical reconnect. Unplug tinyTouch, reconnect it in download mode, and flash it.")
-    say("After flashing, unplug and reconnect tinyTouch normally.")
+    notify("tinyTouch BOOTSEL mode", "Unplug tinyTouch, reconnect it while holding BOOT, and copy the UF2 to RPI-RP2.")
+    say("Factory flashing requires a physical reconnect. Unplug tinyTouch, hold BOOT while reconnecting it, and copy the firmware UF2 to the RPI-RP2 drive.")
+    say(f"Download the UF2 at {FACTORY_FLASH_URL}. After flashing, unplug and reconnect tinyTouch normally.")
 
 
 def command_status(args: argparse.Namespace) -> None:
@@ -1455,7 +1457,7 @@ def command_keys(args: argparse.Namespace) -> None:
     device = status(port)
     protocol6(device)
     unlock(port, reason="create the PIV identity")
-    serial_command(port, "PIV CREATE", timeout=15)
+    serial_command(port, "PIV CREATE", timeout=PIV_CREATE_TIMEOUT)
     if status(port).get("piv") != "ready":
         raise ToolError("Live verification failed: the PIV identity is not ready.")
     say("The PIV identity is ready.")

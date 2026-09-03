@@ -1,9 +1,7 @@
 const RELEASE_TAG = /^v[0-9]+\.[0-9]+\.[0-9]+-beta(?:[.-][0-9A-Za-z.-]+)?$/
 const RELEASE_ASSETS = new Set([
   'release-manifest.json',
-  'bootloader.bin',
-  'partition-table.bin',
-  'ota_data_initial.bin',
+  'tiny_touch_unified.uf2',
   'tiny_touch_unified.bin',
 ])
 

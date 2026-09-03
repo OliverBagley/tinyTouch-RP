@@ -1,8 +1,9 @@
-#include "tusb.h"
+#include "usb_descriptors.h"
 
 #include <stdio.h>
+#include <string.h>
 
-#include "esp_mac.h"
+#include "platform.h"
 
 #define USB_VID 0x303a
 #define USB_PID 0x4001
@@ -96,8 +97,36 @@ const int tiny_touch_string_descriptor_count =
   sizeof(tiny_touch_string_descriptors) / sizeof(tiny_touch_string_descriptors[0]);
 
 void tiny_touch_init_serial(void) {
-  uint8_t mac[6];
-  if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) return;
+  // The macOS helper matches TT- followed by twelve hex digits.
+  uint8_t id[6];
+  board_id(id);
   snprintf(tiny_touch_serial, sizeof(tiny_touch_serial), "TT-%02X%02X%02X%02X%02X%02X",
-           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+           id[0], id[1], id[2], id[3], id[4], id[5]);
+}
+
+uint8_t const *tud_descriptor_device_cb(void) {
+  return (uint8_t const *)&tiny_touch_device_descriptor;
+}
+
+uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
+  (void)index;
+  return tiny_touch_configuration_descriptor;
+}
+
+uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
+  (void)langid;
+  static uint16_t descriptor[32];
+  if (index >= tiny_touch_string_descriptor_count) return NULL;
+  size_t length;
+  if (index == 0) {
+    memcpy(&descriptor[1], tiny_touch_string_descriptors[0], 2);
+    length = 1;
+  } else {
+    const char *text = tiny_touch_string_descriptors[index];
+    length = strlen(text);
+    if (length > 30) length = 30;
+    for (size_t i = 0; i < length; i++) descriptor[1 + i] = (uint16_t)text[i];
+  }
+  descriptor[0] = (uint16_t)((TUSB_DESC_STRING << 8) | (2 * length + 2));
+  return descriptor;
 }

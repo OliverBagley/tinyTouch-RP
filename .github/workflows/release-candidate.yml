@@ -31,14 +31,22 @@ jobs:
     needs: production-preflight
     runs-on: ubuntu-latest
     environment: release-signing
-    container: espressif/idf:release-v5.3@sha256:0143924cb07c717befe27547896f53b74ffe7c3e856fe0d19c0391ec22dc2222
-    defaults:
-      run:
-        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: raspberrypi/pico-sdk
+          ref: 2.3.0
+          path: pico-sdk
+          persist-credentials: false
+      - name: Install the RP2040 toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
+          git -C pico-sdk submodule update --init lib/tinyusb lib/mbedtls
       - name: Load production firmware signing key
         env:
           SIGNING_KEY_B64: ${{ secrets.TINYTOUCH_FIRMWARE_SIGNING_KEY_B64 }}
@@ -50,21 +58,16 @@ jobs:
       - name: Build signed firmware candidate
         run: |
           candidate_started=$SECONDS
-          source /opt/esp/idf/export.sh
-          idf.py -C firmware/tiny_touch_unified build
-          for image in \
-            firmware/tiny_touch_unified/build/tiny_touch_unified.bin; do
-            espsecure.py verify_signature --version 2 \
-              --keyfile firmware/tiny_touch_unified/secure_boot_signing_key.pem "$image"
-          done
-          for image in \
-            firmware/tiny_touch_unified/build/bootloader/bootloader.bin; do
-            esptool.py --chip esp32s3 image_info "$image"
-          done
-          python packaging/assemble-release.py \
-            --firmware-build firmware/tiny_touch_unified/build \
+          cmake -S firmware/tiny_touch_unified -B firmware/tiny_touch_unified/build -G Ninja \
+            -DPICO_SDK_PATH="$PWD/pico-sdk" -DCMAKE_BUILD_TYPE=Release
+          cmake --build firmware/tiny_touch_unified/build --parallel
+          build=firmware/tiny_touch_unified/build
+          openssl dgst -sha256 -verify "$build/signing_public_key.pem" \
+            -signature "$build/tiny_touch_unified.sig" "$build/tiny_touch_unified.bin"
+          python3 packaging/assemble-release.py \
+            --firmware-build "$build" \
             --build-id "${GITHUB_SHA:0:12}"
-          python packaging/release_integrity.py firmware dist/release --commit "$GITHUB_SHA"
+          python3 packaging/release_integrity.py firmware dist/release --commit "$GITHUB_SHA"
           printf 'Firmware candidate build: %ss\n' "$((SECONDS - candidate_started))" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:

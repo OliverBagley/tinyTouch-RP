@@ -5,19 +5,17 @@
 
 #include "class/hid/hid_device.h"
 #include "config_console.h"
+#include "FreeRTOS.h"
 #include "device_config.h"
-#include "esp_log.h"
-#include "esp_random.h"
 #include "fingerprint.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
-#include "freertos/task.h"
 #include "mbedtls/aes.h"
 #include "mbedtls/md.h"
 #include "piv.h"
+#include "platform.h"
+#include "queue.h"
+#include "task.h"
 #include "usb_descriptors.h"
 
-static const char *TAG = "touch_hid";
 static const uint8_t ascii_to_keycode[128][2] = {HID_ASCII_TO_KEYCODE};
 static QueueHandle_t password_responses;
 static uint32_t event_counter;
@@ -33,10 +31,9 @@ typedef struct {
 static device_log_entry_t device_log[DEVICE_LOG_CAPACITY];
 static size_t device_log_next;
 static size_t device_log_count;
-static portMUX_TYPE device_log_lock = portMUX_INITIALIZER_UNLOCKED;
 
 void touch_pin_hid_log_event(const char *event, int value) {
-  taskENTER_CRITICAL(&device_log_lock);
+  taskENTER_CRITICAL();
   device_log[device_log_next] = (device_log_entry_t) {
     .milliseconds = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS),
     .event = event,
@@ -44,17 +41,17 @@ void touch_pin_hid_log_event(const char *event, int value) {
   };
   device_log_next = (device_log_next + 1) % DEVICE_LOG_CAPACITY;
   if (device_log_count < DEVICE_LOG_CAPACITY) device_log_count++;
-  taskEXIT_CRITICAL(&device_log_lock);
+  taskEXIT_CRITICAL();
 }
 
 void touch_pin_hid_send_logs(void) {
   device_log_entry_t entries[DEVICE_LOG_CAPACITY];
   size_t count;
-  taskENTER_CRITICAL(&device_log_lock);
+  taskENTER_CRITICAL();
   count = device_log_count;
   size_t first = (device_log_next + DEVICE_LOG_CAPACITY - count) % DEVICE_LOG_CAPACITY;
   for (size_t i = 0; i < count; i++) entries[i] = device_log[(first + i) % DEVICE_LOG_CAPACITY];
-  taskEXIT_CRITICAL(&device_log_lock);
+  taskEXIT_CRITICAL();
   char line[96];
   for (size_t i = 0; i < count; i++) {
     snprintf(line, sizeof(line), "LOG ms=%lu event=%s value=%d",
@@ -287,7 +284,7 @@ static bool request_and_type_password(fingerprint_match_t match) {
   size_t host_count = device_config_copy_hid_hosts(hosts);
   if (host_count == 0) return false;
   memcpy(pairing_key, hosts[0].key, sizeof(pairing_key));
-  esp_fill_random(nonce_bytes, sizeof(nonce_bytes));
+  fill_random(nonce_bytes, sizeof(nonce_bytes));
   bytes_to_hex(nonce_bytes, sizeof(nonce_bytes), nonce);
   event_counter++;
   xQueueReset(password_responses);
@@ -361,19 +358,19 @@ typedef struct {
 
 static void handle_fingerprint_match(fingerprint_match_t match) {
   if (device_config_mode() == DEVICE_MODE_HID) {
-    ESP_LOGI(TAG, "finger matched; requesting HID password");
+    LOGI("finger matched; requesting HID password");
     bool success = request_and_type_password(match);
     touch_pin_hid_log_event(success ? "hid_typed" : "hid_failed", match.slot);
-    if (!success) ESP_LOGW(TAG, "HID helper request failed");
+    if (!success) LOGW("HID helper request failed");
   } else {
     // The PIV applet accepts this PIN. Emit it only after a verified background
     // fingerprint match, so the macOS smart-card PIN field can complete login.
     static const uint8_t piv_pin[] = {'1', '1', '1', '1', '1', '1'};
-    ESP_LOGI(TAG, "finger matched; authorizing and completing PIV login");
+    LOGI("finger matched; authorizing and completing PIV login");
     piv_note_user_presence();
     bool typed = type_ascii(piv_pin, sizeof(piv_pin));
     touch_pin_hid_log_event(typed ? "piv_pin_typed" : "piv_pin_failed", match.slot);
-    if (!typed) ESP_LOGW(TAG, "PIV PIN typing failed");
+    if (!typed) LOGW("PIV PIN typing failed");
   }
 }
 
@@ -480,7 +477,7 @@ static void touch_hid_task(void *arg) {
 void touch_pin_hid_start(void) {
   password_responses = xQueueCreate(1, 640);
   configASSERT(password_responses != NULL);
-  BaseType_t created = xTaskCreate(touch_hid_task, "touch_hid", 6144, NULL, 4, NULL);
+  BaseType_t created = xTaskCreate(touch_hid_task, "touch_hid", 1536, NULL, 4, NULL);
   configASSERT(created == pdPASS);
 }
 
@@ -497,7 +494,7 @@ bool touch_pin_hid_submit_response(const char *response) {
     return false;
   }
   char queued[640] = {0};
-  strlcpy(queued, response, sizeof(queued));
+  snprintf(queued, sizeof(queued), "%s", response);
   return xQueueSend(password_responses, queued, 0) == pdTRUE;
 }
 

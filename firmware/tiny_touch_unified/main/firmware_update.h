@@ -6,6 +6,10 @@
 
 #define FIRMWARE_UPDATE_CHUNK_MAX 3072
 
+// Call first at boot, before USB or the scheduler start. Installs a verified
+// staged image over the running application and resets; returns otherwise.
+void firmware_update_apply_pending(void);
+
 bool firmware_update_begin(size_t size, const uint8_t expected_sha256[32]);
 bool firmware_update_write(size_t offset, const uint8_t *data, size_t length);
 bool firmware_update_commit(void);

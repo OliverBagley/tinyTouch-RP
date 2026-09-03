@@ -2,13 +2,13 @@
 set -euo pipefail
 
 firmware_dir="${0:A:h}/tiny_touch_unified"
-selected_port=""
+build_dir="$firmware_dir/build"
 build_only=false
 
 usage() {
-  print "Usage: ./firmware/build-and-flash [--build-only] [--port /dev/cu.usbmodem... ]"
+  print "Usage: ./firmware/build-and-flash [--build-only]"
   print
-  print "Build the unified ESP32-S3 factory firmware and optionally flash one device."
+  print "Build the RP2040-Zero factory firmware and optionally copy it to a board in BOOTSEL mode."
 }
 
 while (( $# > 0 )); do
@@ -16,14 +16,6 @@ while (( $# > 0 )); do
     --build-only)
       build_only=true
       shift
-      ;;
-    --port)
-      if (( $# < 2 )); then
-        print -u2 "--port needs a device path."
-        exit 2
-      fi
-      selected_port="$2"
-      shift 2
       ;;
     -h|--help)
       usage
@@ -37,32 +29,53 @@ while (( $# > 0 )); do
   esac
 done
 
-idf_export=""
-if [[ -n "${IDF_PATH:-}" && -f "$IDF_PATH/export.sh" ]]; then
-  idf_export="$IDF_PATH/export.sh"
-elif [[ -f "$HOME/esp/esp-idf/export.sh" ]]; then
-  idf_export="$HOME/esp/esp-idf/export.sh"
+# Toolchain: PATH first, then the Pico VS Code extension layout, then the Arm cask.
+if ! command -v arm-none-eabi-gcc >/dev/null 2>&1; then
+  for candidate in $HOME/.pico-sdk/toolchain/*/bin(N/On) /Applications/ArmGNUToolchain/*/arm-none-eabi/bin(N/On); do
+    if [[ -x "$candidate/arm-none-eabi-gcc" ]]; then
+      export PATH="$candidate:$PATH"
+      break
+    fi
+  done
 fi
+if ! command -v arm-none-eabi-gcc >/dev/null 2>&1; then
+  print -u2 "arm-none-eabi-gcc was not found."
+  print -u2 "Install the Arm GNU toolchain (brew install --cask gcc-arm-embedded) or the Raspberry Pi Pico VS Code extension."
+  exit 1
+fi
+command -v cmake >/dev/null 2>&1 || { print -u2 "cmake was not found (brew install cmake)."; exit 1; }
 
-if [[ -z "$idf_export" ]]; then
-  print -u2 "ESP-IDF was not found."
-  print -u2 "Install ESP-IDF 5.3.x, then set IDF_PATH or place it at ~/esp/esp-idf."
+sdk="${PICO_SDK_PATH:-}"
+if [[ -z "$sdk" ]]; then
+  for candidate in "$HOME/pico-sdk" $HOME/.pico-sdk/sdk/*(N/On); do
+    if [[ -f "$candidate/pico_sdk_init.cmake" ]]; then
+      sdk="$candidate"
+      break
+    fi
+  done
+fi
+if [[ ! -f "$sdk/pico_sdk_init.cmake" ]]; then
+  print -u2 "Pico SDK 2.x was not found."
+  print -u2 "Clone https://github.com/raspberrypi/pico-sdk to ~/pico-sdk or set PICO_SDK_PATH."
+  exit 1
+fi
+if [[ ! -f "$sdk/lib/tinyusb/src/tusb.h" || ! -f "$sdk/lib/mbedtls/library/aes.c" ]]; then
+  print -u2 "Pico SDK submodules are missing. Run: git -C $sdk submodule update --init lib/tinyusb lib/mbedtls"
   exit 1
 fi
 
-print "Step 1 of 3: Load ESP-IDF"
-set +u
-source "$idf_export" >/dev/null
-set -u
-idf_version="$("${0:A:h}/check-idf-version")"
-print "  ✓ $idf_version"
+print "Step 1 of 3: Configure"
+print "  Pico SDK: $sdk"
+print "  Compiler: $(command -v arm-none-eabi-gcc)"
+cmake -S "$firmware_dir" -B "$build_dir" -DPICO_SDK_PATH="$sdk" -DCMAKE_BUILD_TYPE=Release >/dev/null
+print "  ✓ Configured."
 
 print
 print "Step 2 of 3: Build unified factory firmware"
-cd "$firmware_dir"
-idf.py build
+cmake --build "$build_dir" --parallel
 print "  ✓ Firmware build completed."
-print "  Application: $firmware_dir/build/tiny_touch_unified.bin"
+print "  Factory image (UF2): $build_dir/tiny_touch_unified.uf2"
+print "  OTA image (signed):  $build_dir/tiny_touch_unified.signed.bin"
 
 if $build_only; then
   print
@@ -70,43 +83,21 @@ if $build_only; then
   exit 0
 fi
 
-if [[ -z "$selected_port" ]]; then
-  ports=(/dev/cu.usbmodem*(N) /dev/cu.usbserial*(N))
-  if (( ${#ports} == 0 )); then
-    print -u2 "No ESP32-S3 serial port was found."
-    print -u2 "For a blank board, hold BOOT while connecting USB, then run this command again."
-    exit 1
-  elif (( ${#ports} == 1 )); then
-    selected_port="${ports[1]}"
-  else
-    print "Connected serial devices:"
-    for (( index = 1; index <= ${#ports}; index++ )); do
-      print "  $index. ${ports[$index]}"
-    done
-    if ! read "choice?Choose the ESP32-S3 device number: "; then
-      print -u2 "Device selection needs an interactive Terminal. Use --port instead."
-      exit 2
-    fi
-    if [[ "$choice" != <-> ]] || (( choice < 1 || choice > ${#ports} )); then
-      print -u2 "That device selection is not valid."
-      exit 2
-    fi
-    selected_port="${ports[$choice]}"
-  fi
-fi
-
-if [[ ! -e "$selected_port" ]]; then
-  print -u2 "The selected port does not exist: $selected_port"
-  exit 1
-fi
-
 print
 print "Step 3 of 3: Flash the factory firmware"
-print "  Device: $selected_port"
-print "  Do not disconnect it until verification finishes."
-idf.py -p "$selected_port" flash
-print "  ✓ Firmware was written and verified."
+volume=/Volumes/RPI-RP2
+if [[ ! -d "$volume" ]]; then
+  print "  Hold BOOT on the RP2040-Zero while connecting USB, or hold BOOT and tap RESET."
+  print "  Waiting for the RPI-RP2 drive..."
+  for (( attempt = 0; attempt < 120; attempt++ )); do
+    [[ -d "$volume" ]] && break
+    sleep 1
+  done
+fi
+[[ -d "$volume" ]] || { print -u2 "The RPI-RP2 drive did not appear."; exit 1; }
+cp -X "$build_dir/tiny_touch_unified.uf2" "$volume/"
+print "  ✓ Firmware was copied. The board restarts when the drive disappears."
 print
 print "Factory flash complete."
-print "Because the ZW111 stays powered during an MCU reset, unplug and reconnect USB once now."
+print "Because the sensor stays powered during an MCU reset, unplug and reconnect USB once now."
 print "After reconnecting, customer configuration uses only: tinytouch setup"

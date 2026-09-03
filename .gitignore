@@ -4,13 +4,9 @@ firmware/tiny_touch_unified/main/secrets.h
 *.pem
 !*.example.pem
 
-# ESP-IDF and packaging outputs
+# Pico SDK and packaging outputs
 firmware/tiny_touch_unified/build/
 firmware/tiny_touch_unified/build-local/
-firmware/tiny_touch_unified/build-recovery/
-firmware/tiny_touch_unified/.cache/
-firmware/tiny_touch_unified/managed_components/
-firmware/tiny_touch_unified/sdkconfig.old
 build/
 dist/
 

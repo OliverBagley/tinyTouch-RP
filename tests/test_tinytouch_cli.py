@@ -448,7 +448,7 @@ class ProtocolSixTests(unittest.TestCase):
             [call.args[0] for call in output.call_args_list],
         )
         self.assertIn(
-            "Setting up PIV certificates. This may take up to 30 seconds.",
+            "Setting up PIV certificates. RSA key generation on the RP2040 can take several minutes.",
             [call.args[0] for call in output.call_args_list],
         )
 

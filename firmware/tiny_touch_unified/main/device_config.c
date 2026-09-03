@@ -1,15 +1,12 @@
 #include "device_config.h"
 
-#include <assert.h>
 #include <string.h>
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
+#include "FreeRTOS.h"
 #include "mbedtls/sha256.h"
-#include "nvs.h"
+#include "semphr.h"
+#include "storage.h"
 
-#define CONFIG_NAMESPACE "tt6"
-#define CONFIG_KEY "config"
 #define CONFIG_VERSION 6
 
 typedef struct {
@@ -26,8 +23,8 @@ typedef struct {
 static stored_config_t config;
 static SemaphoreHandle_t config_mutex;
 
-static void lock(void) { assert(xSemaphoreTake(config_mutex, portMAX_DELAY) == pdTRUE); }
-static void unlock(void) { assert(xSemaphoreGive(config_mutex) == pdTRUE); }
+static void lock(void) { configASSERT(xSemaphoreTake(config_mutex, portMAX_DELAY) == pdTRUE); }
+static void unlock(void) { configASSERT(xSemaphoreGive(config_mutex) == pdTRUE); }
 
 static void defaults(stored_config_t *value) {
   memset(value, 0, sizeof(*value));
@@ -62,12 +59,7 @@ static bool valid(const stored_config_t *value) {
 }
 
 static bool save_locked(const stored_config_t *candidate) {
-  nvs_handle_t handle;
-  if (nvs_open(CONFIG_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) return false;
-  esp_err_t result = nvs_set_blob(handle, CONFIG_KEY, candidate, sizeof(*candidate));
-  if (result == ESP_OK) result = nvs_commit(handle);
-  nvs_close(handle);
-  return result == ESP_OK;
+  return storage_write(STORAGE_CONFIG, candidate, sizeof(*candidate));
 }
 
 static bool replace_locked(const stored_config_t *candidate) {
@@ -78,17 +70,14 @@ static bool replace_locked(const stored_config_t *candidate) {
 
 void device_config_init(void) {
   config_mutex = xSemaphoreCreateMutex();
-  assert(config_mutex != NULL);
+  configASSERT(config_mutex != NULL);
   stored_config_t loaded = {0};
-  size_t length = sizeof(loaded);
-  nvs_handle_t handle;
-  bool opened = nvs_open(CONFIG_NAMESPACE, NVS_READONLY, &handle) == ESP_OK;
-  bool loaded_ok = opened && nvs_get_blob(handle, CONFIG_KEY, &loaded, &length) == ESP_OK &&
+  size_t length = 0;
+  bool loaded_ok = storage_read(STORAGE_CONFIG, &loaded, sizeof(loaded), &length) &&
                    length == sizeof(loaded) && valid(&loaded);
-  if (opened) nvs_close(handle);
   lock();
   if (loaded_ok) config = loaded;
-  else { defaults(&config); assert(save_locked(&config)); }
+  else { defaults(&config); configASSERT(save_locked(&config)); }
   unlock();
 }
 

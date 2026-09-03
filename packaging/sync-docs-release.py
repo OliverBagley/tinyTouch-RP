@@ -38,7 +38,7 @@ def main() -> None:
         (destination / "manifest.json").write_text(
             json.dumps(layout, indent=2) + "\n", encoding="utf-8"
         )
-        for metadata in [*layout["images"], layout["fullImage"]]:
+        for metadata in layout["images"]:
             copy_asset(release, firmware, metadata)
 
     cli = public / "cli"

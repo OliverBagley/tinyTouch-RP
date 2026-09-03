@@ -16,21 +16,21 @@ ROOT = Path(__file__).resolve().parent.parent
 VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 PROTOCOL = 6
 SECURE_VERSION = 0
-FLASH_BYTES = 4 * 1024 * 1024
-APP_DESCRIPTION_MAGIC = 0xABCD5432
+BOARDS = ["waveshare-rp2040-zero"]
+APP_MAX_BYTES = 992 * 1024
+SIGNATURE_BYTES = 384
+DESCRIPTOR_MAGIC = b"\x7fTTFW\x01"
+UF2_MAGIC_START0 = 0x0A324655
+UF2_MAGIC_START1 = 0x9E5D5157
+UF2_MAGIC_END = 0x0AB16F30
+UF2_FLASH_BASE = 0x10000000
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 BUILD_PATTERN = re.compile(r"[0-9a-f]{12}")
 NAME_PATTERN = re.compile(r"[A-Za-z0-9._-]+")
 EXPECTED_IMAGES = {
     "factory": {
-        0x0: "bootloader.bin",
-        0x8000: "partition-table.bin",
-        0x10000: "tiny_touch_unified.bin",
-        0x210000: "ota_data_initial.bin",
+        0x0: "tiny_touch_unified.uf2",
     },
-}
-EXPECTED_FULL_IMAGES = {
-    "factory": "tiny_touch_factory_full.bin",
 }
 
 
@@ -77,38 +77,62 @@ def checked_asset(metadata: object, path: Path, label: str) -> dict:
     return metadata
 
 
-def app_description(path: Path) -> dict[str, object]:
+def app_description(data: bytes, name: str) -> dict[str, str]:
+    """Parse the descriptor the firmware embeds (see main/main.c)."""
+    offset = data.find(DESCRIPTOR_MAGIC)
+    end = data.find(b"\0", offset) if offset >= 0 else -1
+    require(offset >= 0 and end > offset, f"missing firmware descriptor: {name}")
+    try:
+        text = data[offset + len(DESCRIPTOR_MAGIC):end].decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise IntegrityError(f"invalid firmware descriptor text: {name}") from exc
+    fields = {}
+    for item in text.split(";"):
+        if item:
+            key, _, value = item.partition("=")
+            fields[key] = value
+    return fields
+
+
+def validate_app(path: Path, version: str, build: str) -> bytes:
+    """Check the signed OTA image and return its application bytes."""
     data = path.read_bytes()
-    offset = data.find(struct.pack("<I", APP_DESCRIPTION_MAGIC))
-    require(offset == 0x20 and offset + 144 <= len(data),
-            f"missing ESP app descriptor at offset 0x20: {path.name}")
-
-    def text(start: int, size: int) -> str:
-        try:
-            return data[offset + start:offset + start + size].split(b"\0", 1)[0].decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise IntegrityError(f"invalid ESP app descriptor text: {path.name}") from exc
-
-    return {
-        "secure_version": struct.unpack_from("<I", data, offset + 4)[0],
-        "version": text(16, 32),
-        "project": text(48, 32),
-        "idf": text(112, 32),
-    }
-
-
-def validate_app(path: Path, version: str, build: str, kind: str) -> None:
-    description = app_description(path)
-    require(description["version"] == version,
-            f"embedded version mismatch in {path.name}: {description['version']}")
-    require(description["project"] == "tiny_touch_unified",
-            f"embedded project mismatch in {path.name}: {description['project']}")
-    require(description["idf"].startswith("v5.3."),
-            f"unexpected ESP-IDF version in {path.name}: {description['idf']}")
-    require(description["secure_version"] == SECURE_VERSION,
-            f"embedded secure version mismatch in {path.name}")
-    require(build.encode("ascii") in path.read_bytes(),
+    require(len(data) > SIGNATURE_BYTES, f"OTA image has no signature trailer: {path.name}")
+    application = data[:-SIGNATURE_BYTES]
+    require(len(application) <= APP_MAX_BYTES, f"application exceeds the flash region: {path.name}")
+    description = app_description(application, path.name)
+    require(description.get("version") == version,
+            f"embedded version mismatch in {path.name}: {description.get('version')}")
+    require(description.get("project") == "tiny_touch_unified",
+            f"embedded project mismatch in {path.name}: {description.get('project')}")
+    require(description.get("board") == "rp2040-zero",
+            f"embedded board mismatch in {path.name}: {description.get('board')}")
+    require(description.get("protocol") == str(PROTOCOL),
+            f"embedded protocol mismatch in {path.name}: {description.get('protocol')}")
+    require(description.get("build") == build,
             f"build ID {build} is not embedded in {path.name}")
+    return application
+
+
+def uf2_payload(path: Path) -> bytes:
+    """Reassemble the flash contents of a UF2 written from the start of flash."""
+    data = path.read_bytes()
+    require(len(data) > 0 and len(data) % 512 == 0, f"invalid UF2 size: {path.name}")
+    blocks: dict[int, bytes] = {}
+    for offset in range(0, len(data), 512):
+        start0, start1, _flags, address, size, _number, _count, _family = struct.unpack_from(
+            "<8I", data, offset)
+        end = struct.unpack_from("<I", data, offset + 508)[0]
+        require(start0 == UF2_MAGIC_START0 and start1 == UF2_MAGIC_START1 and end == UF2_MAGIC_END,
+                f"invalid UF2 block: {path.name}")
+        require(0 < size <= 476 and address >= UF2_FLASH_BASE and address not in blocks,
+                f"invalid UF2 block layout: {path.name}")
+        blocks[address - UF2_FLASH_BASE] = data[offset + 32:offset + 32 + size]
+    payload = b""
+    for address in sorted(blocks):
+        require(address == len(payload), f"UF2 is not contiguous from the start of flash: {path.name}")
+        payload += blocks[address]
+    return payload
 
 
 def asset_path(root: Path, kind: str, name: str, flat: bool) -> Path:
@@ -122,12 +146,10 @@ def validate_layout(root: Path, kind: str, layout: object, version: str,
     require(layout.get("protocol") == protocol, f"{kind} protocol mismatch")
     require(layout.get("secureVersion") == SECURE_VERSION,
             f"{kind} secure version mismatch")
-    require(layout.get("flashSize") == "4MB", f"{kind} flash size mismatch")
-    require(layout.get("eraseAll") is False, f"{kind} must not use host-side eraseAll")
-    require(layout.get("compress") is False, f"{kind} compression must be disabled")
+    require(layout.get("board") == BOARDS[0], f"{kind} board mismatch")
     images = layout.get("images")
     require(isinstance(images, list) and len(images) == len(EXPECTED_IMAGES[kind]),
-            f"{kind} must contain exactly four flash images")
+            f"{kind} must contain exactly one flash image")
     seen: dict[int, tuple[int, str]] = {}
     public: dict[str, str] = {}
     for index, image in enumerate(images):
@@ -140,25 +162,12 @@ def validate_layout(root: Path, kind: str, layout: object, version: str,
                 f"unexpected {kind} image {name} at {address!r}")
         path = asset_path(root, kind, name, flat)
         checked_asset(image, path, f"{kind} image")
-        end = address + image["size"]
-        require(end <= FLASH_BYTES, f"{kind} image exceeds 4 MB flash: {name}")
-        seen[address] = (end, name)
-        previous = sorted(seen.items())
-        for (_, (left_end, left_name)), (right_address, (_, right_name)) in zip(previous, previous[1:]):
-            require(left_end <= right_address,
-                    f"{kind} flash images overlap: {left_name} and {right_name}")
+        require(address not in seen, f"duplicate {kind} image address: {name}")
+        seen[address] = (address + image["size"], name)
         checksum = image["sha256"]
         if name in public:
             require(public[name] == checksum, f"conflicting public asset: {name}")
         public[name] = checksum
-    full = layout.get("fullImage")
-    full_name = EXPECTED_FULL_IMAGES[kind]
-    require(isinstance(full, dict) and full.get("file") == full_name,
-            f"invalid {kind} full image metadata")
-    checked_asset(full, asset_path(root, kind, full_name, flat), f"{kind} full image")
-    public[full_name] = full["sha256"]
-    app_name = EXPECTED_IMAGES[kind][0x10000]
-    validate_app(asset_path(root, kind, app_name, flat), version, build, kind)
     return public
 
 
@@ -194,8 +203,7 @@ def validate_release(root: Path, commit: str, *, flat: bool = False,
     require(isinstance(build, str) and BUILD_PATTERN.fullmatch(build) is not None,
             "invalid release build ID")
     require(build == commit[:12], "release build ID does not match candidate commit")
-    require(manifest.get("boards") == ["esp32s3-super-mini", "seeed-xiao-esp32s3"],
-            "unexpected board compatibility list")
+    require(manifest.get("boards") == BOARDS, "unexpected board compatibility list")
     firmware = manifest.get("firmware")
     require(isinstance(firmware, dict) and set(firmware) == {"factory"},
             "release must contain one factory layout")
@@ -207,10 +215,12 @@ def validate_release(root: Path, commit: str, *, flat: bool = False,
             if name in public:
                 require(public[name] == checksum, f"conflicting public asset: {name}")
             public[name] = checksum
-    factory_app = asset_path(root, "factory", "tiny_touch_unified.bin", flat)
-    ota = checked_asset(manifest.get("ota"), root / "tiny_touch_unified.bin",
-                        "OTA image")
-    require(ota["sha256"] == digest(factory_app), "OTA image differs from factory application")
+    ota = checked_asset(manifest.get("ota"), root / "tiny_touch_unified.bin", "OTA image")
+    public[ota["file"]] = ota["sha256"]
+    application = validate_app(root / "tiny_touch_unified.bin", version, build)
+    factory = uf2_payload(asset_path(root, "factory", "tiny_touch_unified.uf2", flat))
+    require(factory.startswith(application) and len(factory) - len(application) < 512,
+            "factory UF2 differs from the OTA application")
     cli = manifest.get("cli")
     if not require_cli:
         require(cli is None, "firmware-only release unexpectedly contains CLI metadata")

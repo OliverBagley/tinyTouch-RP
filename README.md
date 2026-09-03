@@ -148,18 +148,13 @@ pairing_key="$(openssl rand -hex 32)"
 .venv/bin/python software/macos-helper/tinytouch_helper.py --set-pairing-key "$pairing_key"
 .venv/bin/python software/macos-helper/tinytouch_helper.py --set-password 'your-password-here'
 
-cp firmware/tiny_touch_keyboard/secrets.example.h firmware/tiny_touch_keyboard/secrets.h
 ```
 
-edit `firmware/tiny_touch_keyboard/secrets.h` so it contains the same pairing
-key bytes, then flash `firmware/tiny_touch_keyboard/tiny_touch_keyboard.ino`
-with arduino ide.
+then build and flash the unified firmware onto the rp2040-zero (hold BOOT while
+plugging it in):
 
-board settings used here:
-
-```text
-usb cdc on boot: enabled
-usb mode: usb-otg
+```sh
+./firmware/build-and-flash
 ```
 
 run the helper:
@@ -195,12 +190,10 @@ then paste:
 - `piv_cert_9d.pem` into `PIV_CERT_9D_PEM`
 - `piv_key_9d.pem` into `PIV_PRIVATE_KEY_9D_PEM`
 
-build and flash:
+build and flash (hold BOOT while plugging the board in):
 
 ```sh
-idf.py set-target esp32s3
-idf.py build
-idf.py -p /dev/cu.usbmodem101 flash
+./firmware/build-and-flash
 ```
 
 after flashing:
@@ -224,22 +217,24 @@ when macos asks for the pin, touch the sensor.
 
 | part | used here | notes |
 | -- | -- | -- |
-| microcontroller | seeed studio esp32-s3 | needs native usb and hardware uart. secure boot + flash encryption strongly recommended |
+| microcontroller | waveshare rp2040-zero | needs native usb and a hardware uart. rsa runs in software, so piv setup takes a few minutes. the rp2040 has no secure boot or flash encryption |
 | fingerprint sensor | zw101-style uart sensor | uses the common `0xef01` packet protocol |
 | computer | macos | hid mode needs the helper. piv/pam mode needs macos smart card support |
 | case | printed top/bottom stl | `hardware/case/case_top.stl` and `hardware/case/case_bottom.stl` |
 | wiring/solder/etc | misc | whatever your build needs |
 
-other esp32-s3 boards should work if the usb and uart pins are available. other
-fingerprint sensors may work if they speak the same uart protocol. other
-microcontroller families can work, but are not currently supported.
+other rp2040 boards should work if GP0, GP1, and GP2 are available (the pins
+live at the top of `firmware/tiny_touch_unified/main/fingerprint.c`). other
+fingerprint sensors may work if they speak the same uart protocol. the esp32-s3
+firmware this was ported from lives in the upstream repository.
 
 ## wiring
 
-the fingerprint sensor connects over uart to pins 6 and 7 for tx and rx.
+the fingerprint sensor connects over uart to GP0 (board tx, sensor rx) and GP1
+(board rx, sensor tx).
 
-the interrupt pin can be connected anywhere. in firmware, it is connected to pin
-1.
+the touch/interrupt pin can be connected anywhere. in firmware, it is connected
+to GP2.
 
 ## notes
 

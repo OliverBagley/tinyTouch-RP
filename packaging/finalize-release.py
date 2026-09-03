@@ -37,7 +37,7 @@ def main() -> None:
     copy_once(release / "release-manifest.json", output / "release-manifest.json")
     for kind in ("factory",):
         layout = manifest["firmware"][kind]
-        for metadata in [*layout["images"], layout["fullImage"]]:
+        for metadata in layout["images"]:
             copy_once(release / kind / metadata["file"], output / metadata["file"])
     for metadata in (manifest["ota"], *manifest["cli"].values()):
         copy_once(release / metadata["file"], output / metadata["file"])
