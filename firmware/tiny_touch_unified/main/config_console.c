@@ -127,11 +127,16 @@ static void authorize(void) {
 #endif
   int count = fingerprint_count();
   if (count < 0) { reply("ERR AUTH sensor=offline"); return; }
-  bool ok = count == 0 || (count > 0 && fingerprint_authorize_prompted(touch_prompt));
+  // A device with no paired computer and no PIV identity protects nothing
+  // yet, so it must not be locked by templates a sensor shipped with or kept
+  // from an earlier owner. Enrollment replaces them.
+  bool first_setup = count == 0 ||
+                     (device_config_hid_host_count() == 0 && !piv_uses_provisioned_keys());
+  bool ok = first_setup || fingerprint_authorize_prompted(touch_prompt);
   if (!ok) { reply("ERR AUTH no_match"); return; }
   authorized_until = now_us() + AUTH_WINDOW_US;
   piv_note_configuration_presence();
-  reply(count == 0 ? "OK AUTH first_setup=1" : "OK AUTH");
+  reply(first_setup ? "OK AUTH first_setup=1" : "OK AUTH");
 }
 
 static bool token_matches(const char *token) {

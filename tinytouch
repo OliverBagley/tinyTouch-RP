@@ -923,6 +923,11 @@ def enroll(port: str, skip: bool) -> None:
             raise ToolError("Fingerprint enrollment was not changed.")
     say("")
     unlock(port, reason="start fingerprint enrollment")
+    if count:
+        # Old templates (previous owner, factory test prints) would otherwise
+        # stay in slots the four-view profile does not overwrite.
+        serial_command(port, "FINGER CLEAR", timeout=10)
+        say("Previous fingerprints were erased.")
     visual = sys.stdout.isatty()
     if visual and sys.stdin.isatty():
         introduce_enrollment()

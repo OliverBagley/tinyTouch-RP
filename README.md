@@ -189,6 +189,7 @@ When the password prompt appears, touch the sensor. If it says nothing else, it 
 ## If something goes wrong
 
 - **Check the board is talking:** `python3 tinytouch status`. You want `sensor=ready` and `protocol=6`.
+- **"AUTH no_match" on a brand-new board:** the sensor came with fingerprints already stored in it. Update to the latest firmware (Part 2 and Part 4) and run setup again; a device that has never been paired now lets you in and enrollment erases the old prints.
 - **"sensor=offline":** the wiring is wrong, or the firmware thinks the sensor is on different pins. Recheck Part 3, especially TX/RX being crossed and the pin numbers in the firmware. Then unplug and replug the board.
 - **The RPI-RP2 drive never appears:** you let go of BOOT too early, or the cable is charge-only. Try again with BOOT held the whole time you plug in.
 - **Start over completely:** `python3 tinytouch factory-reset` erases fingerprints and keys. Then run setup again.
