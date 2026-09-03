@@ -166,7 +166,7 @@ Back in Terminal, in the project folder:
 cd ~/tinyTouch-RP && python3 tinytouch setup
 ```
 
-The setup walks you through everything and tells you when to touch the sensor. This is what it asks:
+The first time, it spends a minute installing a small Python environment inside the project folder (you will see pip output). That is normal. Then the setup walks you through everything and tells you when to touch the sensor. This is what it asks:
 
 1. **Touch the sensor** to prove you are there.
 2. **Choose a mode.** Type `p` for PIV or `h` for HID.

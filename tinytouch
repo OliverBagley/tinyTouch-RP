@@ -1668,8 +1668,28 @@ def parser() -> argparse.ArgumentParser:
     return parser
 
 
+def bootstrap_source_environment() -> None:
+    """Re-run this script under the repo venv so pyserial is always available.
+
+    The packaged CLI bundles its dependencies. From a source checkout the system
+    python3 usually lacks pyserial, so create the same venv the helper uses and
+    hand over to it.
+    """
+    if FROZEN or os.environ.get("TINYTOUCH_BOOTSTRAPPED"):
+        return
+    try:
+        import serial  # type: ignore  # noqa: F401
+        return
+    except ImportError:
+        pass
+    python = ensure_helper_environment()
+    os.environ["TINYTOUCH_BOOTSTRAPPED"] = "1"
+    os.execv(str(python), [str(python), str(Path(__file__).resolve()), *sys.argv[1:]])
+
+
 def main() -> int:
     global VERBOSE
+    bootstrap_source_environment()
     if len(sys.argv) > 1 and sys.argv[1] == "_package_test":
         package_test()
         return 0
