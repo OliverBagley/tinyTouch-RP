@@ -44,11 +44,26 @@ class ProtocolSixTests(unittest.TestCase):
         self.assertEqual(
             prompts,
             [
-                "Touch the fingerprint sensor with the left edge of your finger.",
-                "Touch the fingerprint sensor with the right edge of your finger.",
-                "Touch the fingerprint sensor with the top of your finger.",
-                "Touch the fingerprint sensor with the center of your finger.",
+                "Tap the fingerprint sensor with the left edge of your finger, then lift your finger from the sensor.",
+                "Tap the fingerprint sensor with the right edge of your finger, then lift your finger from the sensor.",
+                "Tap the fingerprint sensor with the top of your finger, then lift your finger from the sensor.",
+                "Tap the fingerprint sensor with the center of your finger, then lift your finger from the sensor.",
             ],
+        )
+        repeat_prompts = [
+            call.kwargs["touch_again_prompt"] for call in command.call_args_list
+        ]
+        self.assertEqual(
+            repeat_prompts,
+            [
+                "Tap the fingerprint sensor with the left edge of your finger again.",
+                "Tap the fingerprint sensor with the right edge of your finger again.",
+                "Tap the fingerprint sensor with the top of your finger again.",
+                "Tap the fingerprint sensor with the center of your finger again.",
+            ],
+        )
+        self.assertTrue(
+            all(call.kwargs["lift_prompt"] is None for call in command.call_args_list)
         )
 
     def test_update_release_refetches_latest_from_immutable_version(self):
@@ -258,6 +273,60 @@ class ProtocolSixTests(unittest.TestCase):
             cli.command_pair(args)
         text = "\n".join(call.args[0] for call in output.call_args_list)
         self.assertIn("If you are not sure, select 1.", text)
+
+    def test_new_piv_identity_wait_has_creation_guidance(self):
+        args = SimpleNamespace(
+            mode="piv", port="/dev/cu.TT-1234", skip_enroll=False, no_pair=False
+        )
+        device = {
+                "firmware": "0.1.15-prod",
+                "protocol": "6",
+                "mode": "piv",
+                "piv": "unconfigured",
+                "fingerprints": "4",
+                "sensor": "ready",
+        }
+        statuses = iter([device, {**device, "piv": "ready"}])
+        identities = ([], ["A" * 40, "B" * 40])
+        with (
+            mock.patch.object(cli, "require_macos"),
+            mock.patch.object(cli, "choose_port", return_value=args.port),
+            mock.patch.object(cli, "remove_helper"),
+            mock.patch.object(cli, "foreground_session"),
+            mock.patch.object(cli, "status", side_effect=lambda _port: next(statuses)),
+            mock.patch.object(cli, "protocol6"),
+            mock.patch.object(cli, "sensor_ready"),
+            mock.patch.object(cli, "unlock") as unlock,
+            mock.patch.object(cli, "serial_command"),
+            mock.patch.object(
+                cli, "wait_for_piv_identities", return_value=identities
+            ) as wait,
+            mock.patch.object(cli, "fresh_status", return_value={"piv": "ready"}),
+            mock.patch.object(cli, "enroll"),
+            mock.patch.object(cli, "command_pair") as pair,
+            mock.patch.object(cli, "say") as output,
+        ):
+            cli.command_setup(args)
+        self.assertNotIn("explain_pin", unlock.call_args.kwargs)
+        self.assertEqual(wait.call_args.kwargs["timeout"], 30.0)
+        self.assertIn("Creating PIV identities", wait.call_args.kwargs["message"])
+        self.assertTrue(pair.call_args.kwargs["separate_identity_list"])
+        self.assertIn(
+            "tinyTouch is ready in PIV mode.",
+            [call.args[0] for call in output.call_args_list],
+        )
+
+    def test_macos_authorization_explains_hidden_password_input(self):
+        results = [SimpleNamespace(returncode=1), SimpleNamespace(returncode=0)]
+        with (
+            mock.patch.object(cli, "_sudo_session_ready", False),
+            mock.patch.object(cli.subprocess, "run", side_effect=results),
+            mock.patch.object(cli, "say") as output,
+        ):
+            cli.authorize_macos()
+        text = "\n".join(call.args[0] for call in output.call_args_list)
+        self.assertIn("Authorize macOS in this terminal.", text)
+        self.assertIn("Your typing is hidden", text)
 
     def test_piv_unlock_prints_pin_before_macos_can_prompt(self):
         with (
