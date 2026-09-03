@@ -98,30 +98,29 @@ ENROLLMENT_VIEWS = (
 def fingerprint_oval(active: str) -> str:
     """Draw one stable fingerprint oval with one region highlighted."""
     rows = (
-        "          ___________",
-        "       /ttttttttttttttt\\",
-        "     /ttttttttttttttttttt\\",
-        "    /ttttttttttttttttttttt\\",
-        "   /llllllllcccccccrrrrrrrr\\",
-        "  |llllllllllcccccccrrrrrrrrrrr|",
-        "  |llllllllllcccccccrrrrrrrrrrr|",
-        "  |llllllllllcccccccrrrrrrrrrrr|",
-        "  |llllllllllcccccccrrrrrrrrrrr|",
-        "  |llllllllllcccccccrrrrrrrrrrr|",
-        "  |llllllllllcccccccrrrrrrrrrrr|",
-        "   \\llllllllcccccccrrrrrrrr/",
-        "    \\lllllllcccccccrrrrrrr/",
-        "     \\llllllcccccccrrrrrr/",
-        "       \\llllcccccccrrrr/",
-        "          ‾‾‾‾‾‾‾‾‾‾‾",
+        "        ttttttttt",
+        "     ttt         ttt",
+        "   ll               rr",
+        "  ll                 rr",
+        " ll                   rr",
+        "ll        ccccc        rr",
+        "ll        ccccc        rr",
+        "ll        ccccc        rr",
+        "ll                     rr",
+        "ll                     rr",
+        " ll                   rr",
+        "  ll                 rr",
+        "   ll               rr",
+        "     nnn         nnn",
+        "        nnnnnnnnn",
     )
-    zone_for_marker = {"l": "left", "r": "right", "t": "top", "c": "center"}
-    color_for_zone = {view: color for view, _label, color in ENROLLMENT_VIEWS}
-    color_enabled = (
-        sys.stdout.isatty()
-        and os.environ.get("NO_COLOR") is None
-        and os.environ.get("TERM") != "dumb"
-    )
+    zone_for_marker = {
+        "l": "left",
+        "r": "right",
+        "t": "top",
+        "c": "center",
+        "n": "neutral",
+    }
     rendered = []
     for row in rows:
         line = []
@@ -130,10 +129,11 @@ def fingerprint_oval(active: str) -> str:
             if zone is None:
                 line.append(character)
             elif zone == active:
-                mark = "█" if color_enabled else "#"
-                line.append(terminal_style(mark, f"1;{color_for_zone[zone]}"))
-            else:
+                line.append("█")
+            elif zone == "center":
                 line.append(" ")
+            else:
+                line.append("░")
         rendered.append("".join(line))
     return "\n".join(rendered)
 
