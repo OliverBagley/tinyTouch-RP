@@ -98,22 +98,22 @@ ENROLLMENT_VIEWS = (
 def fingerprint_oval(active: str) -> str:
     """Draw one filled Braille oval with one region highlighted."""
     rows = (
-        "        ttttttt",
-        "      ttttttttttt",
-        "    ttttttttttttttt",
-        "   ttttttttttttttttt",
-        "  llllllcccccrrrrrr",
-        " lllllllcccccrrrrrrr",
-        "lllllllcccccrrrrrrr",
-        "lllllllcccccrrrrrrr",
-        "lllllllcccccrrrrrrr",
-        "lllllllcccccrrrrrrr",
-        " lllllllcccccrrrrrrr",
-        "  llllllcccccrrrrrr",
-        "   lllllcccccrrrrr",
-        "    llllcccccrrrr",
-        "      lllcccccrrr",
-        "        lcccccr",
+        "        ttttttttt",
+        "      ttttttttttttt",
+        "    ttttttttttttttttt",
+        "  ttttttttttttttttttttt",
+        " llllllllcccccccrrrrrrrr",
+        "lllllllllcccccccrrrrrrrrrr",
+        "lllllllllcccccccrrrrrrrrrr",
+        "lllllllllcccccccrrrrrrrrrr",
+        "lllllllllcccccccrrrrrrrrrr",
+        "lllllllllcccccccrrrrrrrrrr",
+        "lllllllllcccccccrrrrrrrrrr",
+        " llllllllcccccccrrrrrrrr",
+        "  lllllllcccccccrrrrrrr",
+        "    lllllcccccccrrrrr",
+        "      lllcccccccrrr",
+        "        lcccccccr",
     )
     zone_for_marker = {"l": "left", "r": "right", "t": "top", "c": "center"}
     color_for_zone = {view: color for view, _label, color in ENROLLMENT_VIEWS}
@@ -145,6 +145,7 @@ def command_enroll_demo(_args: argparse.Namespace) -> None:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise ToolError("The enrollment demo needs an interactive Terminal.")
     view_index = 0
+    tap_index = 0
     previous = tty.tcgetattr(sys.stdin.fileno()) if hasattr(tty, "tcgetattr") else None
     try:
         tty.setcbreak(sys.stdin.fileno())
@@ -152,17 +153,33 @@ def command_enroll_demo(_args: argparse.Namespace) -> None:
             zone, label, _color = ENROLLMENT_VIEWS[view_index]
             sys.stdout.write("\033[2J\033[H")
             say(terminal_style("Fingerprint enrollment", "1"))
-            say(f"View {view_index + 1} of {len(ENROLLMENT_VIEWS)}")
+            say(
+                f"View {view_index + 1} of {len(ENROLLMENT_VIEWS)}"
+                f"  ·  Tap {tap_index + 1} of 2"
+            )
             say("")
             say(fingerprint_oval(zone))
             say("")
-            say(f"Tap the sensor with the {terminal_style(label, '1')} of your finger.")
-            say(terminal_style("Tab: next    q: exit", "2"))
+            if tap_index == 0:
+                say(
+                    f"Tap the sensor with the {terminal_style(label, '1')} of your finger, "
+                    "then lift it."
+                )
+            else:
+                say(
+                    f"Tap the sensor with the {terminal_style(label, '1')} "
+                    "of your finger again."
+                )
+            say(terminal_style("Tab: simulate tap    q: exit", "2"))
             key = os.read(sys.stdin.fileno(), 1)
             if key in {b"q", b"Q", b"\x03", b"\x1b", b"\r", b"\n"}:
                 break
             if key == b"\t":
-                view_index = (view_index + 1) % len(ENROLLMENT_VIEWS)
+                if tap_index == 0:
+                    tap_index = 1
+                else:
+                    tap_index = 0
+                    view_index = (view_index + 1) % len(ENROLLMENT_VIEWS)
     finally:
         if previous is not None:
             tty.tcsetattr(sys.stdin.fileno(), tty.TCSADRAIN, previous)
