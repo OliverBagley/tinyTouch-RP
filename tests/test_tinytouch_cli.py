@@ -241,11 +241,21 @@ class ProtocolSixTests(unittest.TestCase):
 
     def test_piv_unlock_prints_pin_before_macos_can_prompt(self):
         with (
-            mock.patch.object(cli, "serial_command", return_value=["OK AUTH"]),
+            mock.patch.object(
+                cli, "serial_command", return_value=["OK AUTH"]
+            ) as command,
             mock.patch.object(cli, "explain_piv_pin") as explain,
         ):
-            cli.unlock("/dev/cu.TT-1234", explain_pin=True)
+            cli.unlock(
+                "/dev/cu.TT-1234",
+                explain_pin=True,
+                reason="pair PIV with this Mac",
+            )
         explain.assert_called_once_with()
+        self.assertEqual(
+            command.call_args.kwargs["touch_prompt"],
+            "Touch the fingerprint sensor now to pair PIV with this Mac.",
+        )
 
     def test_hid_host_list_preserves_eight_host_capacity(self):
         with mock.patch.object(
