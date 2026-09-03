@@ -142,8 +142,10 @@ def fingerprint_oval(active: str | None, tap_index: int = 0) -> str:
     return "\n".join(rendered)
 
 
-def show_enroll_demo(view_index: int, tap_index: int, active: bool = True) -> None:
-    """Render one frame of the local enrollment preview."""
+def show_enrollment_view(
+    view_index: int, tap_index: int, active: bool = True, demo: bool = False,
+) -> None:
+    """Render one frame of fingerprint enrollment."""
     zone, label, _color = ENROLLMENT_VIEWS[view_index]
     sys.stdout.write("\033[2J\033[H")
     say(terminal_style("Fingerprint enrollment", "1"))
@@ -166,7 +168,20 @@ def show_enroll_demo(view_index: int, tap_index: int, active: bool = True) -> No
             f"Tap the sensor with the {terminal_style(label, '1')} "
             "of your finger again."
         )
-    say(terminal_style("Tab: simulate tap    q: exit", "2"))
+    if demo:
+        say(terminal_style("Tab: simulate tap    q: exit", "2"))
+
+
+def show_enrollment_event(view_index: int, event: str) -> None:
+    """Map firmware enrollment events to their matching visual state."""
+    states = {
+        "EVENT TOUCH": (0, True),
+        "EVENT LIFT": (0, False),
+        "EVENT TOUCH_AGAIN": (1, True),
+    }
+    state = states.get(event)
+    if state is not None:
+        show_enrollment_view(view_index, *state)
 
 
 def command_enroll_demo(_args: argparse.Namespace) -> None:
@@ -179,13 +194,13 @@ def command_enroll_demo(_args: argparse.Namespace) -> None:
     try:
         tty.setcbreak(sys.stdin.fileno())
         while True:
-            show_enroll_demo(view_index, tap_index)
+            show_enrollment_view(view_index, tap_index, demo=True)
             key = os.read(sys.stdin.fileno(), 1)
             if key in {b"q", b"Q", b"\x03", b"\x1b", b"\r", b"\n"}:
                 break
             if key == b"\t":
                 if tap_index == 0:
-                    show_enroll_demo(view_index, tap_index, active=False)
+                    show_enrollment_view(view_index, tap_index, active=False, demo=True)
                     time.sleep(0.35)
                     tap_index = 1
                 else:
@@ -520,6 +535,7 @@ def exchange_serial(
     lift_prompt: str | None = "Lift your finger from the sensor.",
     touch_again_prompt: str | None = None,
     wait_message: str | None = None,
+    event_handler=None,
 ) -> list[str]:
     lines: list[str] = []
     touch_prompted = False
@@ -548,7 +564,11 @@ def exchange_serial(
                 continue
             lines.append(line)
             verbose("device: " + line)
-            if line == "EVENT TOUCH" and not touch_prompted:
+            if line.startswith("EVENT ") and event_handler is not None:
+                event_handler(line)
+                if line == "EVENT TOUCH":
+                    touch_prompted = True
+            elif line == "EVENT TOUCH" and not touch_prompted:
                 say(touch_prompt or "Touch the fingerprint sensor now.")
                 touch_prompted = True
             elif line == "EVENT LIFT" and lift_prompt:
@@ -618,13 +638,14 @@ def serial_command(
     lift_prompt: str | None = "Lift your finger from the sensor.",
     touch_again_prompt: str | None = None,
     wait_message: str | None = None,
+    event_handler=None,
 ) -> list[str]:
     if _active_serial is not None:
         try:
             return exchange_serial(
                 _active_serial, command, timeout=timeout, touch_prompt=touch_prompt,
                 lift_prompt=lift_prompt, touch_again_prompt=touch_again_prompt,
-                wait_message=wait_message,
+                wait_message=wait_message, event_handler=event_handler,
             )
         except Exception as exc:
             if "Device not configured" in str(exc):
@@ -638,7 +659,7 @@ def serial_command(
             return exchange_serial(
                 _active_serial, command, timeout=timeout, touch_prompt=touch_prompt,
                 lift_prompt=lift_prompt, touch_again_prompt=touch_again_prompt,
-                wait_message=wait_message,
+                wait_message=wait_message, event_handler=event_handler,
             )
     except Exception as exc:
         if "Device not configured" in str(exc):
@@ -892,8 +913,10 @@ def enroll(port: str, skip: bool) -> None:
             raise ToolError("Fingerprint enrollment was not changed.")
     say("")
     unlock(port, reason="start fingerprint enrollment")
+    visual = sys.stdout.isatty()
     for slot, (_zone, view, _color) in enumerate(ENROLLMENT_VIEWS, 1):
-        say("")
+        if not visual:
+            say("")
         serial_command(
             port,
             f"FINGER ENROLL {slot}",
@@ -906,7 +929,13 @@ def enroll(port: str, skip: bool) -> None:
             touch_again_prompt=(
                 f"Tap the fingerprint sensor with the {view} of your finger again."
             ),
+            event_handler=(
+                lambda event, view_index=slot - 1: show_enrollment_event(view_index, event)
+            ) if visual else None,
         )
+    if visual:
+        sys.stdout.write("\033[2J\033[H")
+        say("Fingerprint enrollment complete.")
     current = status(port)
     if current.get("fingerprints") != "4":
         raise ToolError("Live verification failed: the four-view fingerprint profile was not reported.")
@@ -1061,7 +1090,19 @@ def command_enroll(args: argparse.Namespace) -> None:
     protocol6(device)
     sensor_ready(device)
     unlock(port, reason="add this fingerprint")
-    serial_command(port, f"FINGER ENROLL {args.slot}", timeout=45)
+    visual = sys.stdout.isatty()
+    view_index = min(max(args.slot - 1, 0), len(ENROLLMENT_VIEWS) - 1)
+    serial_command(
+        port,
+        f"FINGER ENROLL {args.slot}",
+        timeout=45,
+        event_handler=(
+            lambda event: show_enrollment_event(view_index, event)
+        ) if visual else None,
+    )
+    if visual:
+        sys.stdout.write("\033[2J\033[H")
+        say("Fingerprint enrolled.")
     current = status(port)
     if int(current.get("fingerprints", "0")) < 1:
         raise ToolError("Live verification failed: the enrollment was not reported.")
