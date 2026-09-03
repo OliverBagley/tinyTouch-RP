@@ -44,11 +44,26 @@ class ProtocolSixTests(unittest.TestCase):
         self.assertEqual(
             prompts,
             [
-                "Touch the fingerprint sensor with the left edge of your finger.",
-                "Touch the fingerprint sensor with the right edge of your finger.",
-                "Touch the fingerprint sensor with the top of your finger.",
-                "Touch the fingerprint sensor with the center of your finger.",
+                "Tap the fingerprint sensor with the left edge of your finger, then lift your finger from the sensor.",
+                "Tap the fingerprint sensor with the right edge of your finger, then lift your finger from the sensor.",
+                "Tap the fingerprint sensor with the top of your finger, then lift your finger from the sensor.",
+                "Tap the fingerprint sensor with the center of your finger, then lift your finger from the sensor.",
             ],
+        )
+        repeat_prompts = [
+            call.kwargs["touch_again_prompt"] for call in command.call_args_list
+        ]
+        self.assertEqual(
+            repeat_prompts,
+            [
+                "Tap the fingerprint sensor with the left edge of your finger again.",
+                "Tap the fingerprint sensor with the right edge of your finger again.",
+                "Tap the fingerprint sensor with the top of your finger again.",
+                "Tap the fingerprint sensor with the center of your finger again.",
+            ],
+        )
+        self.assertTrue(
+            all(call.kwargs["lift_prompt"] is None for call in command.call_args_list)
         )
 
     def test_update_release_refetches_latest_from_immutable_version(self):

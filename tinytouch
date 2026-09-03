@@ -367,6 +367,8 @@ def install_helper() -> None:
 
 def exchange_serial(
     device, command: str, *, timeout: float, touch_prompt: str | None = None,
+    lift_prompt: str | None = "Lift your finger from the sensor.",
+    touch_again_prompt: str | None = None,
 ) -> list[str]:
     lines: list[str] = []
     touch_prompted = False
@@ -385,12 +387,12 @@ def exchange_serial(
         if line == "EVENT TOUCH" and not touch_prompted:
             say(touch_prompt or "Touch the fingerprint sensor now.")
             touch_prompted = True
-        elif line == "EVENT LIFT":
-            say("Lift your finger from the sensor.")
+        elif line == "EVENT LIFT" and lift_prompt:
+            say(lift_prompt)
         elif line == "EVENT TOUCH_AGAIN":
             if touch_prompt:
                 say("")
-            say("Touch the same finger again now.")
+            say(touch_again_prompt or "Touch the same finger again now.")
         if is_terminal(command, line):
             break
     if not lines or not is_terminal(command, lines[-1]):
@@ -446,11 +448,14 @@ def foreground_session(port: str):
 def serial_command(
     port: str, command: str, *, timeout: float = 20.0,
     touch_prompt: str | None = None,
+    lift_prompt: str | None = "Lift your finger from the sensor.",
+    touch_again_prompt: str | None = None,
 ) -> list[str]:
     if _active_serial is not None:
         try:
             return exchange_serial(
                 _active_serial, command, timeout=timeout, touch_prompt=touch_prompt,
+                lift_prompt=lift_prompt, touch_again_prompt=touch_again_prompt,
             )
         except Exception as exc:
             if "Device not configured" in str(exc):
@@ -463,6 +468,7 @@ def serial_command(
         with foreground_session(port):
             return exchange_serial(
                 _active_serial, command, timeout=timeout, touch_prompt=touch_prompt,
+                lift_prompt=lift_prompt, touch_again_prompt=touch_again_prompt,
             )
     except Exception as exc:
         if "Device not configured" in str(exc):
@@ -723,7 +729,14 @@ def enroll(port: str, skip: bool) -> None:
             port,
             f"FINGER ENROLL {slot}",
             timeout=45,
-            touch_prompt=f"Touch the fingerprint sensor with the {view} of your finger.",
+            touch_prompt=(
+                f"Tap the fingerprint sensor with the {view} of your finger, "
+                "then lift your finger from the sensor."
+            ),
+            lift_prompt=None,
+            touch_again_prompt=(
+                f"Tap the fingerprint sensor with the {view} of your finger again."
+            ),
         )
     current = status(port)
     if current.get("fingerprints") != "4":
