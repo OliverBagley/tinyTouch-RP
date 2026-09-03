@@ -17,4 +17,4 @@ After recovery, unplug and reconnect the device, wait 20 seconds, then run:
 tinytouch setup
 ```
 
-See the [Recovery reference](/reference/recovery) for details, including how to erase all stored keys first.
+Flashing the factory image erases the board's settings and PIV keys, so recovery works even when the fingerprint check locks you out. See the [Recovery reference](/reference/recovery) for details.

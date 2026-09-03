@@ -24,6 +24,8 @@ UF2_MAGIC_START0 = 0x0A324655
 UF2_MAGIC_START1 = 0x9E5D5157
 UF2_MAGIC_END = 0x0AB16F30
 UF2_FLASH_BASE = 0x10000000
+UF2_STATE_OFFSET = 0x1F0000
+UF2_FLASH_SIZE = 0x200000
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 BUILD_PATTERN = re.compile(r"[0-9a-f]{12}")
 NAME_PATTERN = re.compile(r"[A-Za-z0-9._-]+")
@@ -129,9 +131,19 @@ def uf2_payload(path: Path) -> bytes:
                 f"invalid UF2 block layout: {path.name}")
         blocks[address - UF2_FLASH_BASE] = data[offset + 32:offset + 32 + size]
     payload = b""
+    state = b""
     for address in sorted(blocks):
-        require(address == len(payload), f"UF2 is not contiguous from the start of flash: {path.name}")
-        payload += blocks[address]
+        if address < UF2_STATE_OFFSET:
+            require(address == len(payload), f"UF2 is not contiguous from the start of flash: {path.name}")
+            payload += blocks[address]
+        else:
+            require(address == UF2_STATE_OFFSET + len(state),
+                    f"UF2 state-erase blocks are not contiguous: {path.name}")
+            state += blocks[address]
+    # The factory image must clear every device-state sector so a reflash
+    # always returns the board to first setup.
+    require(len(state) == UF2_FLASH_SIZE - UF2_STATE_OFFSET and state == b"\xff" * len(state),
+            f"UF2 does not erase the device-state sectors: {path.name}")
     return payload
 
 

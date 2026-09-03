@@ -46,13 +46,15 @@ class ReleasePipelineTests(unittest.TestCase):
 
     def make_uf2(self, path: Path) -> None:
         application = self.application()
+        chunks = [(number * 256, application[number * 256:(number + 1) * 256].ljust(256, b"\0"))
+                  for number in range((len(application) + 255) // 256)]
+        chunks += [(offset, b"\xff" * 256)
+                   for offset in range(integrity.UF2_STATE_OFFSET, integrity.UF2_FLASH_SIZE, 256)]
         blocks = []
-        count = (len(application) + 255) // 256
-        for number in range(count):
-            chunk = application[number * 256:(number + 1) * 256].ljust(256, b"\0")
+        for number, (offset, chunk) in enumerate(chunks):
             block = struct.pack(
                 "<8I", integrity.UF2_MAGIC_START0, integrity.UF2_MAGIC_START1, 0x2000,
-                integrity.UF2_FLASH_BASE + number * 256, 256, number, count, 0xE48BFF56,
+                integrity.UF2_FLASH_BASE + offset, 256, number, len(chunks), 0xE48BFF56,
             ) + chunk.ljust(476, b"\0") + struct.pack("<I", integrity.UF2_MAGIC_END)
             blocks.append(block)
         path.write_bytes(b"".join(blocks))

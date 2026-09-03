@@ -119,10 +119,11 @@ pico_enable_stdio_usb(tiny_touch_unified 0)
 pico_add_extra_outputs(tiny_touch_unified)
 
 add_custom_command(TARGET tiny_touch_unified POST_BUILD
+  COMMAND python3 "${CMAKE_CURRENT_LIST_DIR}/tools/append_state_erase.py" tiny_touch_unified.uf2
   COMMAND openssl dgst -sha256 -sign "${TINYTOUCH_SIGNING_KEY}"
           -out tiny_touch_unified.sig tiny_touch_unified.bin
   COMMAND sh -c "cat tiny_touch_unified.bin tiny_touch_unified.sig > tiny_touch_unified.signed.bin"
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
-  COMMENT "Signing the OTA image"
+  COMMENT "Adding the state-erase blocks to the UF2 and signing the OTA image"
   VERBATIM
 )

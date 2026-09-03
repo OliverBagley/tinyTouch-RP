@@ -133,7 +133,7 @@ onMounted(selectTool)
         <li>Copy the UF2 onto <strong>RPI-RP2</strong>. The drive disappears when the board restarts.</li>
         <li>Unplug and reconnect once, then run <code>tinytouch setup</code>.</li>
       </ol>
-      <p class="flash-description">To erase all stored keys and settings first, copy Raspberry Pi's <a href="https://www.raspberrypi.com/documentation/microcontrollers/pico-series.html#resetting-flash-memory">flash_nuke.uf2</a> onto RPI-RP2 before the tinyTouch UF2.</p>
+      <p class="flash-description">The factory image also erases the board's settings, paired computers, and PIV keys, so a reflash always returns to first setup. Fingerprints stay in the sensor until setup replaces them.</p>
       <div v-if="status" class="flash-status" :class="statusKind" role="status">{{ status }}</div>
     </div>
   </section>

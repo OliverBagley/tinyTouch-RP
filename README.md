@@ -156,6 +156,8 @@ cp -X ~/tinyTouch-RP/firmware/tiny_touch_unified/build/tiny_touch_unified.uf2 /V
 5. The drive disappears by itself. That means it worked.
 6. **Unplug the board and plug it back in** once. The sensor needs this.
 
+Flashing the factory file also **erases everything the board remembered**: mode, paired Macs, PIV keys. That is on purpose. It means reflashing always gets you back to a clean first setup, even if you are locked out. Fingerprints live in the sensor, not the board, so they survive; setup offers to erase them.
+
 Shortcut: instead of steps 2 to 5 you can run `./firmware/build-and-flash` without `--build-only` and it waits for the RPI-RP2 drive and copies the file for you.
 
 ## Part 5: Set up the Mac
@@ -189,10 +191,10 @@ When the password prompt appears, touch the sensor. If it says nothing else, it 
 ## If something goes wrong
 
 - **Check the board is talking:** `python3 tinytouch status`. You want `sensor=ready` and `protocol=6`.
-- **"AUTH no_match" on a brand-new board:** the sensor came with fingerprints already stored in it. Update to the latest firmware (Part 2 and Part 4) and run setup again; a device that has never been paired now lets you in and enrollment erases the old prints.
+- **"AUTH no_match":** the sensor holds fingerprints that this firmware cannot match (they came with the sensor, or were enrolled with another board or tool), and the board is already configured, so it refuses every command. Reflash the factory file (Part 4). That wipes the board's configuration, setup lets you in again, and it offers to erase the old prints and enroll yours.
 - **"sensor=offline":** the wiring is wrong, or the firmware thinks the sensor is on different pins. Recheck Part 3, especially TX/RX being crossed and the pin numbers in the firmware. Then unplug and replug the board.
 - **The RPI-RP2 drive never appears:** you let go of BOOT too early, or the cable is charge-only. Try again with BOOT held the whole time you plug in.
-- **Start over completely:** `python3 tinytouch factory-reset` erases fingerprints and keys. Then run setup again.
+- **Start over completely:** `python3 tinytouch factory-reset` erases fingerprints and keys (it needs a matching finger). If you cannot get past the fingerprint, reflash the factory file instead (Part 4); that wipes the board without one.
 - **Firmware totally broken:** hold BOOT and plug in, then copy the `.uf2` again (Part 4). This always works. The chip cannot be bricked this way.
 - **Do not run `tinytouch update`.** It downloads firmware for the original ESP32 version of this project, which this board rejects. Update by rebuilding (Part 2) and copying the new `.uf2` (Part 4).
 

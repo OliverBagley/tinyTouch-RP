@@ -10,7 +10,7 @@ Requirements: Pico SDK 2.x (with the `lib/tinyusb` and `lib/mbedtls` submodules)
 
 Outputs in `build/`:
 
-- `tiny_touch_unified.uf2`: factory image, copied to the `RPI-RP2` drive in BOOTSEL mode.
+- `tiny_touch_unified.uf2`: factory image, copied to the `RPI-RP2` drive in BOOTSEL mode. It also erases the device-state sectors, so flashing it is a factory reset.
 - `tiny_touch_unified.signed.bin`: OTA image (application followed by an RSA-3072 signature) served by `tinytouch update`.
 
 Without `secure_boot_signing_key.pem` the build signs with a throwaway key kept in `build/`, so a device that has a release firmware will refuse locally built OTA images. Factory flashing over BOOTSEL always works.
