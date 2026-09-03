@@ -21,6 +21,36 @@ loader.exec_module(cli)
 
 
 class ProtocolSixTests(unittest.TestCase):
+    def test_mode_prompt_explains_hid_and_piv(self):
+        with (
+            mock.patch.object(cli, "say") as output,
+            mock.patch.object(cli, "ask", return_value="h"),
+        ):
+            self.assertEqual(cli.choose_mode(None), "hid")
+        text = "\n".join(call.args[0] for call in output.call_args_list)
+        self.assertIn("HID — Types your password", text)
+        self.assertIn("PIV — Acts as a smart card", text)
+
+    def test_enrollment_uses_directional_prompts(self):
+        statuses = iter([{"fingerprints": "0"}, {"fingerprints": "4"}])
+        with (
+            mock.patch.object(cli, "status", side_effect=lambda _port: next(statuses)),
+            mock.patch.object(cli, "unlock"),
+            mock.patch.object(cli, "serial_command") as command,
+            mock.patch.object(cli, "say"),
+        ):
+            cli.enroll("/dev/cu.TT-1234", False)
+        prompts = [call.kwargs["touch_prompt"] for call in command.call_args_list]
+        self.assertEqual(
+            prompts,
+            [
+                "Touch the fingerprint sensor with the left edge of your finger.",
+                "Touch the fingerprint sensor with the right edge of your finger.",
+                "Touch the fingerprint sensor with the top of your finger.",
+                "Touch the fingerprint sensor with the center of your finger.",
+            ],
+        )
+
     def test_update_release_refetches_latest_from_immutable_version(self):
         latest = json.dumps({"version": "0.1.10-prod"}).encode()
         exact = json.dumps({"version": "0.1.10-prod", "ota": {}}).encode()
@@ -243,9 +273,11 @@ class ProtocolSixTests(unittest.TestCase):
             mock.patch.object(cli, "remove_helper"),
             mock.patch.object(cli, "device_account", return_value="TT-1234"),
             mock.patch.object(cli, "keychain_delete"),
+            mock.patch.object(cli, "say") as output,
         ):
             cli.command_factory_reset(args)
         self.assertEqual(calls, ["RESET FACTORY"])
+        output.assert_called_once_with("Factory reset completed.")
 
     def test_mode_verifies_the_live_mode_without_reconnect_command(self):
         args = SimpleNamespace(port="/dev/cu.TT-1234", mode="hid")
