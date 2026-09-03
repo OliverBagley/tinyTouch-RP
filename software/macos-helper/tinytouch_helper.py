@@ -135,7 +135,7 @@ def fingerprint_account(device_id: str, slot: int) -> str:
 
 def load_passwords(device_id: str) -> dict[int, bytearray]:
     passwords = {0: keychain_get(device_id)}
-    for slot in range(1, 6):
+    for slot in range(1, 33):
         account = fingerprint_account(device_id, slot)
         if has_password(SERVICE, account):
             try:
@@ -394,7 +394,7 @@ def parse_event(line: str, pairing_key: bytes) -> AuthenticatedEvent | None:
     if not all(re.fullmatch(r"[0-9]+", item) for item in (counter_text, slot_text, score_text)):
         return None
     counter, slot, score = map(int, (counter_text, slot_text, score_text))
-    if not 0 <= counter <= MAX_COUNTER or slot not in range(1, 6) or not 0 <= score <= MAX_SCORE:
+    if not 0 <= counter <= MAX_COUNTER or slot not in range(1, 33) or not 0 <= score <= MAX_SCORE:
         return None
 
     key_id: str | None = None

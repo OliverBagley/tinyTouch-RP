@@ -34,7 +34,8 @@ _Static_assert(FP_INT_PIN != FP_TX_PIN && FP_INT_PIN != FP_RX_PIN, "FP_INT_PIN m
 #define FP_UART (UART_INDEX_FOR_PIN(FP_TX_PIN) ? uart1 : uart0)
 static const int INT_ACTIVE_VALUE = 1;
 static const uint16_t START_SLOT = 1;
-static const uint16_t END_SLOT = 5;
+// Eight fingers, four views each.
+static const uint16_t END_SLOT = 32;
 static const uint32_t FINGER_WAIT_MS = 7000;
 static const uint8_t FP_LED_BLUE = 0x01;
 static const uint8_t FP_LED_GREEN = 0x02;

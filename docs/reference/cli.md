@@ -31,9 +31,13 @@ tinytouch diagnostics --output ~/Desktop/tinytouch-diagnostics.json
 
 ## Fingerprints
 
+Up to 8 fingers, four views each. Finger 1 is enrolled by `setup` and unlocks configuration; fingers 2 to 8 are optional.
+
 ```sh
 tinytouch enroll
+tinytouch enroll --finger 2
 tinytouch enroll --slot 3
+tinytouch delete --finger 2
 tinytouch delete --slot 3
 tinytouch delete --all
 ```

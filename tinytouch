@@ -89,6 +89,8 @@ def terminal_style(text: str, code: str) -> str:
     return f"\033[{code}m{text}\033[0m"
 
 
+MAX_FINGERS = 8
+VIEWS_PER_FINGER = 4
 ENROLLMENT_VIEWS = (
     ("left", "left edge", "36"),
     ("right", "right edge", "35"),
@@ -910,30 +912,22 @@ def host_list(port: str) -> tuple[set[str], int]:
     return ids, capacity
 
 
-def enroll(port: str, skip: bool) -> None:
-    current = status(port)
-    if skip:
-        say("Fingerprint enrollment skipped.")
-        return
-    count = int(current.get("fingerprints", "0"))
-    if count == 4:
-        return
-    if count:
-        say(f"The sensor already holds {count} fingerprint template(s). Only a finger that matches")
-        say("them can unlock this device, so on a new board they must be erased before yours is enrolled.")
-        if ask("Erase them and enroll your fingerprint now? [Y/n] ").lower() in {"n", "no"}:
-            raise ToolError("Fingerprint enrollment was not changed. Run setup again and answer Y to enroll.")
-    say("")
-    unlock(port, reason="start fingerprint enrollment")
-    if count:
-        # Old templates (previous owner, factory test prints) would otherwise
-        # stay in slots the four-view profile does not overwrite.
-        serial_command(port, "FINGER CLEAR", timeout=10)
-        say("Previous fingerprints were erased.")
+def finger_slots(finger: int) -> list[int]:
+    """Sensor slots owned by one finger: four views per finger, eight fingers."""
+    if not 1 <= finger <= MAX_FINGERS:
+        raise ToolError(f"Choose a finger from 1 to {MAX_FINGERS}.")
+    first = (finger - 1) * VIEWS_PER_FINGER + 1
+    return list(range(first, first + VIEWS_PER_FINGER))
+
+
+def enroll_finger(port: str, finger: int) -> None:
+    """Enroll four views of one finger. The device must already be unlocked."""
     visual = sys.stdout.isatty()
     if visual and sys.stdin.isatty():
         introduce_enrollment()
-    for slot, (_zone, view, _color) in enumerate(ENROLLMENT_VIEWS, 1):
+    for view_index, (slot, (_zone, view, _color)) in enumerate(
+        zip(finger_slots(finger), ENROLLMENT_VIEWS)
+    ):
         if not visual:
             say("")
         serial_command(
@@ -949,15 +943,37 @@ def enroll(port: str, skip: bool) -> None:
                 f"Tap the fingerprint sensor with the {view} of your finger again."
             ),
             event_handler=(
-                lambda event, view_index=slot - 1: show_enrollment_event(view_index, event)
+                lambda event, view_index=view_index: show_enrollment_event(view_index, event)
             ) if visual else None,
         )
     if visual:
         sys.stdout.write("\033[2J\033[H")
-        say("Fingerprint enrollment complete.")
+    say(f"Finger {finger} enrolled.")
+
+
+def enroll(port: str, skip: bool) -> None:
     current = status(port)
-    if current.get("fingerprints") != "4":
+    if skip:
+        say("Fingerprint enrollment skipped.")
+        return
+    if int(current.get("fingers", "0")) >= 1:
+        return
+    count = int(current.get("fingerprints", "0"))
+    if count:
+        say(f"The sensor already holds {count} fingerprint template(s) that this firmware did not enroll.")
+        say("They must be erased before your fingerprint is enrolled.")
+        if ask("Erase them and enroll your fingerprint now? [Y/n] ").lower() in {"n", "no"}:
+            raise ToolError("Fingerprint enrollment was not changed. Run setup again and answer Y to enroll.")
+    say("")
+    unlock(port, reason="start fingerprint enrollment")
+    if count:
+        serial_command(port, "FINGER CLEAR", timeout=10)
+        say("Previous fingerprints were erased.")
+    enroll_finger(port, 1)
+    current = status(port)
+    if int(current.get("fingers", "0")) < 1 or int(current.get("fingerprints", "0")) < VIEWS_PER_FINGER:
         raise ToolError("Live verification failed: the four-view fingerprint profile was not reported.")
+    say(f"Add more fingers later with: tinytouch enroll --finger 2 (up to {MAX_FINGERS}).")
 
 
 def command_setup(args: argparse.Namespace) -> None:
@@ -1112,37 +1128,66 @@ def command_enroll(args: argparse.Namespace) -> None:
     device = status(port)
     protocol6(device)
     sensor_ready(device)
-    unlock(port, reason="add this fingerprint")
-    visual = sys.stdout.isatty()
-    if visual and sys.stdin.isatty():
-        introduce_enrollment()
-    view_index = min(max(args.slot - 1, 0), len(ENROLLMENT_VIEWS) - 1)
-    serial_command(
-        port,
-        f"FINGER ENROLL {args.slot}",
-        timeout=45,
-        event_handler=(
-            lambda event: show_enrollment_event(view_index, event)
-        ) if visual else None,
-    )
-    if visual:
-        sys.stdout.write("\033[2J\033[H")
-        say("Fingerprint enrolled.")
+    if args.slot is not None and args.finger is not None:
+        raise ToolError("Choose either --finger or --slot, not both.")
+    if args.slot is not None:
+        if not 1 <= args.slot <= MAX_FINGERS * VIEWS_PER_FINGER:
+            raise ToolError(f"Choose a slot from 1 to {MAX_FINGERS * VIEWS_PER_FINGER}.")
+        unlock(port, reason="add this fingerprint")
+        visual = sys.stdout.isatty()
+        if visual and sys.stdin.isatty():
+            introduce_enrollment()
+        view_index = (args.slot - 1) % VIEWS_PER_FINGER
+        serial_command(
+            port,
+            f"FINGER ENROLL {args.slot}",
+            timeout=45,
+            event_handler=(
+                lambda event: show_enrollment_event(view_index, event)
+            ) if visual else None,
+        )
+        if visual:
+            sys.stdout.write("\033[2J\033[H")
+        say(f"Fingerprint slot {args.slot} enrolled.")
+        return
+    enrolled = int(device.get("fingers", "0"))
+    finger = args.finger if args.finger is not None else enrolled + 1
+    if finger > MAX_FINGERS:
+        raise ToolError(f"All {MAX_FINGERS} fingers are enrolled. Delete one with: tinytouch delete --finger N")
+    if enrolled == 0 and finger != 1:
+        raise ToolError("Enroll finger 1 first (tinytouch enroll or tinytouch setup).")
+    say(f"Enrolling finger {finger} of {MAX_FINGERS}. Use one finger for all four taps.")
+    unlock(port, reason=f"enroll finger {finger}")
+    enroll_finger(port, finger)
     current = status(port)
-    if int(current.get("fingerprints", "0")) < 1:
-        raise ToolError("Live verification failed: the enrollment was not reported.")
+    if int(current.get("fingers", "0")) < finger:
+        raise ToolError("Live verification failed: the new finger was not reported.")
 
 
 def command_delete(args: argparse.Namespace) -> None:
     port = choose_port(args.port)
     device = status(port)
     protocol6(device)
-    unlock(port, reason="delete this fingerprint")
-    serial_command(port, f"FINGER DELETE {args.slot}", timeout=5)
-    current = status(port)
-    if int(current.get("fingerprints", "0")) < 0:
-        raise ToolError("Live verification failed after deleting the fingerprint.")
-    say(f"Fingerprint slot {args.slot} was deleted.")
+    if sum(item is not None and item is not False for item in (args.slot, args.finger, args.all)) != 1:
+        raise ToolError("Choose one of --finger N, --slot N, or --all.")
+    if args.all:
+        unlock(port, reason="erase every fingerprint")
+        serial_command(port, "FINGER CLEAR", timeout=10)
+        say("All fingerprints were erased. Run tinytouch setup or tinytouch enroll to add one.")
+        return
+    if args.slot is not None:
+        unlock(port, reason="delete this fingerprint")
+        serial_command(port, f"FINGER DELETE {args.slot}", timeout=5)
+        say(f"Fingerprint slot {args.slot} was deleted.")
+        return
+    slots = finger_slots(args.finger)
+    if args.finger == 1:
+        say("Finger 1 is the required finger. Deleting it disables the fingerprint lock until a finger is enrolled again.")
+    unlock(port, reason=f"delete finger {args.finger}")
+    # Highest slot first so the firmware's enrolled-slot record steps down cleanly.
+    for slot in reversed(slots):
+        serial_command(port, f"FINGER DELETE {slot}", timeout=5)
+    say(f"Finger {args.finger} was deleted.")
 
 
 def command_computers(args: argparse.Namespace) -> None:
@@ -1623,12 +1668,15 @@ def parser() -> argparse.ArgumentParser:
     config.add_argument("value", nargs="?")
     config.add_argument("--port")
     config.set_defaults(func=command_config)
-    enroll_cmd = sub.add_parser("enroll")
-    enroll_cmd.add_argument("slot", type=int)
+    enroll_cmd = sub.add_parser("enroll", help="enroll a finger (four views); defaults to the next free finger")
+    enroll_cmd.add_argument("--finger", type=int, help=f"finger number 1 to {MAX_FINGERS}")
+    enroll_cmd.add_argument("--slot", type=int, help="enroll one raw sensor slot instead of a whole finger")
     enroll_cmd.add_argument("--port")
     enroll_cmd.set_defaults(func=command_enroll)
-    delete = sub.add_parser("delete")
-    delete.add_argument("slot", type=int)
+    delete = sub.add_parser("delete", help="delete a finger, one slot, or every fingerprint")
+    delete.add_argument("--finger", type=int)
+    delete.add_argument("--slot", type=int)
+    delete.add_argument("--all", action="store_true")
     delete.add_argument("--port")
     delete.set_defaults(func=command_delete)
     computers = sub.add_parser("computers")

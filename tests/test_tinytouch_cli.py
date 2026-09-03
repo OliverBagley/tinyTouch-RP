@@ -50,8 +50,14 @@ class ProtocolSixTests(unittest.TestCase):
         self.assertIn("HID — Types your password", text)
         self.assertIn("PIV — Acts as a smart card", text)
 
+    def test_fingers_map_to_four_sensor_slots_each(self):
+        self.assertEqual(cli.finger_slots(1), [1, 2, 3, 4])
+        self.assertEqual(cli.finger_slots(8), [29, 30, 31, 32])
+        with self.assertRaises(cli.ToolError):
+            cli.finger_slots(9)
+
     def test_enrollment_uses_directional_prompts(self):
-        statuses = iter([{"fingerprints": "0"}, {"fingerprints": "4"}])
+        statuses = iter([{"fingerprints": "0", "fingers": "0"}, {"fingerprints": "4", "fingers": "1"}])
         with (
             mock.patch.object(cli, "status", side_effect=lambda _port: next(statuses)),
             mock.patch.object(cli, "unlock"),

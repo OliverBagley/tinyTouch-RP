@@ -156,10 +156,11 @@ static void status(void) {
   bool sensor_is_ready = fingerprint_is_ready();
   snprintf(line, sizeof(line),
            "OK STATUS protocol=6 firmware=%s build=%s mode=%s piv=%s sensor=%s fingerprints=%d "
-           "hosts=%u ota=%s",
+           "fingers=%u hosts=%u ota=%s",
            TINYTOUCH_FIRMWARE_VERSION, TINYTOUCH_BUILD_ID, device_config_mode_name(),
            piv_uses_provisioned_keys() ? "ready" : "unconfigured",
            sensor_is_ready ? "ready" : "offline", count,
+           (unsigned)((device_config_fingerprint_profile_views() + 3) / 4),
            (unsigned)device_config_hid_host_count(), firmware_update_staged() ? "staged" :
            (firmware_update_active() ? "writing" : "idle"));
   reply(line);
@@ -230,10 +231,15 @@ static void fingerprint_command(char *arguments) {
   uint32_t slot = 0;
   bool ok = false;
   if (strncmp(arguments, "ENROLL ", 7) == 0 && parse_u32(arguments + 7, UINT16_MAX, &slot)) {
+    // fingerprint_profile_views is the highest slot this firmware enrolled;
+    // finger N owns slots 4N-3 to 4N, so ceil(views / 4) is the finger count.
+    uint8_t views = device_config_fingerprint_profile_views();
     ok = fingerprint_enroll((uint16_t)slot, enroll_prompt) &&
-         device_config_set_fingerprint_profile_views((uint8_t)slot);
+         (slot <= views || device_config_set_fingerprint_profile_views((uint8_t)slot));
   } else if (strncmp(arguments, "DELETE ", 7) == 0 && parse_u32(arguments + 7, UINT16_MAX, &slot)) {
-    ok = fingerprint_delete((uint16_t)slot) && device_config_set_fingerprint_profile_views(0);
+    uint8_t views = device_config_fingerprint_profile_views();
+    ok = fingerprint_delete((uint16_t)slot) &&
+         (slot != views || device_config_set_fingerprint_profile_views((uint8_t)(((slot - 1) / 4) * 4)));
   } else if (strcmp(arguments, "CLEAR") == 0) {
     ok = fingerprint_delete_all() && device_config_set_fingerprint_profile_views(0);
   }

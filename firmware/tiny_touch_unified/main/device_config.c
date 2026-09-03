@@ -44,7 +44,7 @@ static void derive_key_id(const uint8_t key[32], uint8_t id[DEVICE_CONFIG_HID_KE
 
 static bool valid(const stored_config_t *value) {
   if (value->version != CONFIG_VERSION || value->mode > DEVICE_MODE_HID ||
-      value->fingerprint_profile_views > 5 || value->submit_enter > 1 ||
+      value->fingerprint_profile_views > 32 || value->submit_enter > 1 ||
       value->typing_delay_ms < 1 || value->typing_delay_ms > 100 ||
       value->touch_cooldown_ms < 100 || value->touch_cooldown_ms > 5000 ||
       value->hid_host_count > DEVICE_CONFIG_MAX_HID_HOSTS) return false;

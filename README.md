@@ -176,7 +176,15 @@ The first time, it spends a minute installing a small Python environment inside 
    - **HID**: the board pretends to be a keyboard and types your password. Works in more places, but it really does type your password into whatever is focused.
 3. If you picked **PIV**, wait. The board makes its own keys. On the RP2040 this **takes several minutes**. Do not touch the sensor and do not unplug it. Get a coffee. When it finishes, macOS asks you to pair the smart card and may ask for your Mac password. Say yes.
 4. If you picked **HID**, it asks for your Mac password once and stores it in your Keychain. The board never keeps it.
-5. **Enroll your fingerprint.** Touch, lift, touch again, exactly as the messages say. Use the same finger.
+5. **Enroll your fingerprint.** Touch, lift, touch again, exactly as the messages say. Use the same finger for all four taps.
+
+To add more fingers later (up to 8 in total), run this once per finger and touch an already enrolled finger when it asks you to unlock:
+
+```bash
+cd ~/tinyTouch-RP && python3 tinytouch enroll
+```
+
+Remove one with `python3 tinytouch delete --finger 2`.
 
 When it says setup is complete, you are done.
 
