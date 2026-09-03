@@ -1,252 +1,206 @@
-## interested in preassembled versions? pre order now:
-[tinytouch.dev](https://tinytouch.dev)
+# tinyTouch for the RP2040-Zero
 
-<img width="2304" height="1152" alt="tinyTouch (4)" src="https://github.com/user-attachments/assets/ec66ec7d-3e14-4292-8085-15374e349057" />
+A fingerprint reader that logs you into your Mac and approves `sudo`. Ported from [ZimengXiong/tinyTouch](https://github.com/ZimengXiong/tinyTouch) (ESP32-S3) to the Waveshare RP2040-Zero.
 
-# tinytouch
-authenticate, sudo, and log in with your fingerprint wire(less)ly without having
-to spend $149.
+This is the "explain it like I'm 5" version. Follow it top to bottom. Every step tells you exactly what to type or do. You do not need to understand any of it.
 
-build guide: https://www.youtube.com/watch?v=YsP1hRg28Gw
+What you end up with: a tiny fingerprint reader that logs you into your Mac and approves `sudo` when you touch it.
 
-https://github.com/user-attachments/assets/efede271-6d84-441d-919c-f5532f687c4e
+## What you need
 
-PIV authentication of sudo:
+- A **Waveshare RP2040-Zero** board (a small purple board with a USB-C port).
+- A **ZW101 / ZW111 style fingerprint sensor** (the one with a 6-pin cable).
+- A **USB-C cable that carries data** (some cheap cables only charge; if in doubt, use the one that came with a phone).
+- A **Mac with Apple silicon** (M1 or newer).
+- Six wires and a way to connect them (soldering iron, or a breadboard and jumper wires).
 
-https://github.com/user-attachments/assets/c197dd9c-81e5-4150-9793-d2e445651dfd
+## Part 1: Get the tools onto your Mac (once)
 
-PIV authentication of lockscreen (you know its PIV because it says PIN and not password in the entry field) (the typing is just the PIV PIN, which we bypass (since we gate by the fingerprint), read below to learn more about it)
+Open the **Terminal** app (press Cmd+Space, type `Terminal`, press Enter). Paste each block below and press Enter. Wait for each one to finish before the next.
 
-https://github.com/user-attachments/assets/88014cb2-34d2-4d63-8998-54f0561364eb
+1. Install Homebrew (a tool that installs other tools). If you already have it, this does nothing bad.
 
-if you would like to support this project, please consider [donating](https://github.com/sponsors/ZimengXiong) or contributing!
-
-
-## table of contents
-
-- [red pill or blue pill?](#red-pill-or-blue-pill)
-- [install](#install)
-  - [red pill](#red-pill)
-  - [blue pill](#blue-pill)
-- [hardware](#hardware)
-- [wiring](#wiring)
-- [notes](#notes)
-
-## red pill or blue pill?
-
-there are two ways to use tinytouch on your computer: `HID` and `PIV/PAM` mode. read about how they work in the sections below.
-
-each has its advantages, and we want to scare you a tiny bit so you actually do
-your diligence and understand the security implications of such a device before
-you decide whether you are willing to take on the risks:
-
-| features | HID | PIV/PAM* |
-| -- | -- | -- |
-| keyboardless login | ✅ | ✅ |
-| sudo prompts | ✅ | ✅ |
-| apple TCC (privacy & security) | ✅ | ✅|
-| general settings | ✅ | ❌ |
-| keychain/apple passwords | ✅ | ❌ |
-| everywhere your password is accepted (remote SSH sessions, etc) | ✅ | depends, but probably not |
-
-| security | HID | PIV/PAM* |
-| -- | -- | -- |
-| fingerprint sensor <-> esp | 🔴 (unauth'ed UART) | 🔴 (unauth'ed UART) |
-| esp <-> computer negotiation | 🟢 (shared-key mac/encryption) | 🔴 (plain usb ccid/apdu) |
-| authentication | 🔴 (password typed over hid) | 🟢 (piv challenge/response) |
-
-| attack | HID | PIV/PAM* |
-| -- | -- | -- |
-| sensor uart spoofing^ | yes | yes |
-| wrong focused field | yes | no |
-| malicious password field | yes | no |
-| usb traffic sniffing | low impact (channel is encrypted/mac'ed) | can observe apdus, not piv private key |
-| usb keylogger | can reveal password | cannot reveal key |
-| usb command injection | reject bad macs/replays | device may receive apdus, but auth still needs fingerprint-gated key use |
-| flash dumping (secure boot/flash encryption off) | shared-key exposable | piv key exposable |
-| flash dumping (secure boot/flash encryption on) | shared-key non-exportable | piv key non-exportable |
-| flash dumping (with secure element) | shared key non-exportable | piv key non-exportable |
-
-*PIV/PAM always uses HID to deliver the mandatory PIV PIN, which we do not use.
-authorization is still gated by your fingerprint. the PIV PIN is not your
-password, and is not considered sensitive in our scenario.
-
-^this is the major security issue with this device. since all authentication
-happens inside the fingerprint sensor, and the sensor communicates with the esp
-over unauthenticated uart, it can be easily spoofed. basic countermeasures
-involve filling the insides of the device with black epoxy. a more proper fix
-would be upgrading to a more secure fingerprint sensor.
-
-### so... which pill, if any?
-this depends on:
-
-1. your security tolerance
-2. your environment
-3. current/future criminal background
-4. family/roommate relations
-5. technical skill set of family members/roommates
-
-risks are low to begin with since every attack here requires *physical access* to
-both the device and your mac.
-
-so ask yourself: will your device ever leave your desk? can your roommates
-perform a flash dump in half an hour? how about your family members? do they have
-anything against you that would create a motive? are you wanted by any government
-agency? are you protecting sensitive or classified information? are you using a
-company device? would you be personally implicated if you leaked company secrets?
-
-if the answer is yes to any of the above questions, i think the magic keyboard presents an excellent value at $149 and is worth the added security.
-
-if the answer is no, chances are you will be fine with a slightly insecure method
-of authentication. personally, i am happy with the red pill and love the
-convenience of having it work everywhere.
-
-### hid mode
-
-in hid mode, the esp acts like a usb keyboard.
-
-the mac helper keeps your real password encrypted and stored on your mac. this
-way, an attacker cannot extract your password from the esp alone. the esp keeps a
-shared pairing key. after a fingerprint match, the esp sends a signed request to
-the helper, the helper checks it, encrypts the password for that one request, and
-sends it back. the esp decrypts it in ram, types it, then wipes it.
-
-this is why it works almost everywhere. it is also why it is scary: the final
-step is still your real password being typed into whatever has focus.
-
-to make it less bad, the esp never stores the password. requests use a nonce and
-mac so old requests cannot just be replayed, and the helper only sends back an
-encrypted one-time response. the password only exists on the esp briefly in ram.
-
-### piv mode
-
-in piv mode, the esp acts like a usb smart card.
-
-macos sends normal piv commands over ccid. when macos needs authentication, it
-asks the card to use the piv private key. the esp only allows that key operation
-right after a fingerprint match.
-
-macos also expects a piv pin, so the firmware has a tiny hid side path that types
-the dummy pin `000000`. that pin is not your mac password. it is just there to
-get through the macos piv prompt while the real authorization is the fingerprint
-gate around the piv key.
-
-this avoids typing your real password, but only works where macos accepts smart
-cards, like login and `sudo` with pam.
-
-## install
-
-### red pill
-use this if you just want the thing to type your password.
-
-```sh
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -r software/macos-helper/requirements.txt
-
-pairing_key="$(openssl rand -hex 32)"
-.venv/bin/python software/macos-helper/tinytouch_helper.py --set-pairing-key "$pairing_key"
-.venv/bin/python software/macos-helper/tinytouch_helper.py --set-password 'your-password-here'
-
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
 
-then build and flash the unified firmware onto the rp2040-zero (hold BOOT while
-plugging it in):
+2. Install the build tools.
 
-```sh
-./firmware/build-and-flash
+```bash
+brew install cmake git python3
 ```
 
-run the helper:
+3. Install the compiler for the RP2040 chip. It asks for your Mac password once.
 
-```sh
-.venv/bin/python software/macos-helper/tinytouch_helper.py
+```bash
+brew install --cask gcc-arm-embedded
 ```
 
-for launchd, edit paths in
-`software/macos-helper/launchd/com.tinytouch.helper.plist`, then copy it to
-`~/Library/LaunchAgents/`.
+4. Download the Pico SDK (Raspberry Pi's code for the chip).
 
-### blue pill
-
-use this if you want the current better path. it exposes piv over ccid, plus hid
-only for the dummy pin `000000`.
-
-`main/secrets.h` needs the piv certs and private keys for slots `9a` and `9d`.
-
-generate test keys:
-
-```sh
-cd firmware/tiny_touch_smartcard
-openssl req -newkey rsa:2048 -nodes -keyout piv_key_9a.pem -x509 -days 3650 -out piv_cert_9a.pem -subj "/CN=tinytouch piv auth/"
-openssl req -newkey rsa:2048 -nodes -keyout piv_key_9d.pem -x509 -days 3650 -out piv_cert_9d.pem -subj "/CN=tinytouch piv key management/"
-cp main/secrets.example.h main/secrets.h
+```bash
+git clone --branch 2.3.0 https://github.com/raspberrypi/pico-sdk.git ~/pico-sdk && git -C ~/pico-sdk submodule update --init lib/tinyusb lib/mbedtls
 ```
 
-then paste:
+5. Download this project.
 
-- `piv_cert_9a.pem` into `PIV_CERT_9A_PEM`
-- `piv_key_9a.pem` into `PIV_PRIVATE_KEY_9A_PEM`
-- `piv_cert_9d.pem` into `PIV_CERT_9D_PEM`
-- `piv_key_9d.pem` into `PIV_PRIVATE_KEY_9D_PEM`
-
-build and flash (hold BOOT while plugging the board in):
-
-```sh
-./firmware/build-and-flash
+```bash
+git clone https://github.com/OliverBagley/tinyTouch-RP.git ~/tinyTouch-RP && cd ~/tinyTouch-RP
 ```
 
-after flashing:
+## Part 2: Build the firmware
 
-```sh
-system_profiler SPSmartCardsDataType
-sc_auth identities
-sudo sc_auth pair -u "$USER" -h <auth-cert-hash>
+There are two ways. Pick one.
+
+### Way A: let GitHub build it (no tools needed)
+
+GitHub's computers build the firmware for you. Every push to `main` builds it, and you can also start a build by hand and type in your sensor pins.
+
+1. Open your repository on github.com and click the **Actions** tab.
+2. In the left list click **CI**, then the **Run workflow** button on the right.
+3. If your sensor is wired to the default pins (Part 3), leave the three boxes empty. Otherwise type the GP numbers: the board pin wired to the sensor's RX, the board pin wired to the sensor's TX, and the TouchOut pin. Numbers only, for example `8`, `9`, `10`.
+4. Click the green **Run workflow** button and wait for the new run to get a green tick. A wrong pin pair fails the build with a message listing the valid pairs.
+5. Click the run, scroll down to **Artifacts**, and click **tinytouch-firmware-rp2040**. A zip downloads.
+6. Unzip it. Inside is `tiny_touch_unified.uf2`. That is the firmware. Skip to Part 3.
+
+You still need Part 1 step 5 (downloading the project) and `python3` for Part 5, but you can skip steps 2 to 4 of Part 1.
+
+### Way B: build on your Mac
+
+Still in Terminal, inside the project folder:
+
+```bash
+cd ~/tinyTouch-RP && ./firmware/build-and-flash --build-only
 ```
 
-to test sudo:
+The first run takes a few minutes. It ends with a line like:
 
-```sh
-sudo -k
-sudo -v
+```text
+Factory image (UF2): .../firmware/tiny_touch_unified/build/tiny_touch_unified.uf2
 ```
 
-when macos asks for the pin, touch the sensor.
+That `.uf2` file is the firmware. You will copy it onto the board in Part 4.
 
-## hardware
+You will also see a warning that `secure_boot_signing_key.pem is missing`. That is fine. It means the build made its own signing key for you. There are no passwords, accounts, or credentials to create anywhere in this guide.
 
-| part | used here | notes |
-| -- | -- | -- |
-| microcontroller | waveshare rp2040-zero | needs native usb and a hardware uart. rsa runs in software, so piv setup takes a few minutes. the rp2040 has no secure boot or flash encryption |
-| fingerprint sensor | zw101-style uart sensor | uses the common `0xef01` packet protocol |
-| computer | macos | hid mode needs the helper. piv/pam mode needs macos smart card support |
-| case | printed top/bottom stl | `hardware/case/case_top.stl` and `hardware/case/case_bottom.stl` |
-| wiring/solder/etc | misc | whatever your build needs |
+## Part 3: Wire the sensor to the board
 
-other rp2040 boards should work if GP0, GP1, and GP2 are available (the pins
-live at the top of `firmware/tiny_touch_unified/main/fingerprint.c`). other
-fingerprint sensors may work if they speak the same uart protocol. the esp32-s3
-firmware this was ported from lives in the upstream repository.
+Unplug everything first. Connect the six sensor pins to the board like this. Look at the numbers printed next to the board's pins.
 
-## wiring
+| Sensor pin | Sensor label | Board pin |
+|---:|---|---|
+| 1 | VTouch | **3V3** |
+| 2 | TouchOut | **GP2** |
+| 3 | VCC | **3V3** |
+| 4 | TX | **GP1** |
+| 5 | RX | **GP0** |
+| 6 | GND | **GND** |
 
-the fingerprint sensor connects over uart to GP0 (board tx, sensor rx) and GP1
-(board rx, sensor tx).
+Two rules that catch everyone:
 
-the touch/interrupt pin can be connected anywhere. in firmware, it is connected
-to GP2.
+- The sensor's **TX goes to GP1** and the sensor's **RX goes to GP0**. They are crossed on purpose.
+- Only use **3V3**, never 5V. The sensor is 3.3 volt.
 
-## notes
+Double check that 3V3 and GND do not touch each other before plugging in USB.
 
-do not commit:
+### My sensor or board uses different pins
 
-- `firmware/tiny_touch_keyboard/secrets.h`
-- `firmware/tiny_touch_smartcard/main/secrets.h`
+The board is the boss, not the sensor: the sensor's six wires can go to any pins you like, as long as the firmware knows which ones. Only the three numbered pins matter. Power and ground can use any 3V3 and GND pin.
 
-[cad](https://cad.onshape.com/documents/d0e6bb7977e6171d4e4a5086/w/1ded27ad6c634fd1fdaf26d0/e/aca67210e400490a08d0b29a?renderMode=0&uiState=6a4c1df32e292f12144a65fe). if you make changes, please make them open source as well.
+The RP2040 chip can only do serial (TX/RX) on certain pin pairs. Pick **one pair** from this table. TouchOut can be any other free GP pin.
 
-## bonus images
+| Board TX pin (sensor RX) | Board RX pin (sensor TX) |
+|---|---|
+| GP0 | GP1 (this is the default) |
+| GP4 | GP5 |
+| GP8 | GP9 |
+| GP12 | GP13 |
+| GP28 | GP29 |
 
-<img width="2261" height="1347" alt="render2" src="https://github.com/user-attachments/assets/5f107d74-d651-4e3b-90ed-f37dcaa026ac" />
-<img width="1238" height="901" alt="cross" src="https://github.com/user-attachments/assets/6a7062d9-ec56-4aac-adad-00d888e7d486" />
-<img width="1280" height="957" alt="tinyTouch" src="https://github.com/user-attachments/assets/ad66c9b3-5823-44d3-bd73-bba64f2e60ab" />
+To change them:
+
+1. Open the file `firmware/tiny_touch_unified/main/fingerprint.c` in any text editor (TextEdit works; in Terminal, `open -e firmware/tiny_touch_unified/main/fingerprint.c`).
+2. Near the top you will see these three lines. Change the numbers only.
+
+```c
+#define FP_TX_PIN 0
+#define FP_RX_PIN 1
+#define FP_INT_PIN 2
+```
+
+   For example, GP8/GP9 with TouchOut on GP10 becomes `8`, `9`, `10`.
+
+3. Save the file, then build again (Part 2). If you picked a pair that the chip cannot do, the build stops and prints a message that lists the valid pairs, so you cannot accidentally make a broken firmware.
+
+If you build on GitHub (Way A) you do not need to edit anything: type the same numbers into the **Run workflow** boxes instead.
+
+If you build on your Mac you can also skip editing the file and type the pins on the command line instead:
+
+```bash
+cd ~/tinyTouch-RP/firmware/tiny_touch_unified && cmake -S . -B build -DPICO_SDK_PATH=$HOME/pico-sdk -DTINYTOUCH_FP_TX_PIN=8 -DTINYTOUCH_FP_RX_PIN=9 -DTINYTOUCH_FP_INT_PIN=10 && cmake --build build --parallel
+```
+
+## Part 4: Put the firmware on the board
+
+1. Find the tiny **BOOT** button on the RP2040-Zero.
+2. **Hold BOOT down**, plug the USB cable into your Mac, then let go.
+3. A drive called **RPI-RP2** appears on your desktop, like a USB stick.
+4. Copy the firmware onto it. Either drag `tiny_touch_unified.uf2` from Finder onto the RPI-RP2 drive, or run:
+
+```bash
+cp -X ~/tinyTouch-RP/firmware/tiny_touch_unified/build/tiny_touch_unified.uf2 /Volumes/RPI-RP2/
+```
+
+5. The drive disappears by itself. That means it worked.
+6. **Unplug the board and plug it back in** once. The sensor needs this.
+
+Shortcut: instead of steps 2 to 5 you can run `./firmware/build-and-flash` without `--build-only` and it waits for the RPI-RP2 drive and copies the file for you.
+
+## Part 5: Set up the Mac
+
+Back in Terminal, in the project folder:
+
+```bash
+cd ~/tinyTouch-RP && python3 tinytouch setup
+```
+
+The setup walks you through everything and tells you when to touch the sensor. This is what it asks:
+
+1. **Touch the sensor** to prove you are there.
+2. **Choose a mode.** Type `p` for PIV or `h` for HID.
+   - **PIV** (recommended): the board pretends to be a smart card. Works for the login screen and `sudo`. Your real password is never typed anywhere.
+   - **HID**: the board pretends to be a keyboard and types your password. Works in more places, but it really does type your password into whatever is focused.
+3. If you picked **PIV**, wait. The board makes its own keys. On the RP2040 this **takes several minutes**. Do not touch the sensor and do not unplug it. Get a coffee. When it finishes, macOS asks you to pair the smart card and may ask for your Mac password. Say yes.
+4. If you picked **HID**, it asks for your Mac password once and stores it in your Keychain. The board never keeps it.
+5. **Enroll your fingerprint.** Touch, lift, touch again, exactly as the messages say. Use the same finger.
+
+When it says setup is complete, you are done.
+
+## Part 6: Try it
+
+```bash
+sudo -k && sudo -v
+```
+
+When the password prompt appears, touch the sensor. If it says nothing else, it worked. Lock your Mac (Ctrl+Cmd+Q) and touch the sensor to unlock.
+
+## If something goes wrong
+
+- **Check the board is talking:** `python3 tinytouch status`. You want `sensor=ready` and `protocol=6`.
+- **"sensor=offline":** the wiring is wrong, or the firmware thinks the sensor is on different pins. Recheck Part 3, especially TX/RX being crossed and the pin numbers in the firmware. Then unplug and replug the board.
+- **The RPI-RP2 drive never appears:** you let go of BOOT too early, or the cable is charge-only. Try again with BOOT held the whole time you plug in.
+- **Start over completely:** `python3 tinytouch factory-reset` erases fingerprints and keys. Then run setup again.
+- **Firmware totally broken:** hold BOOT and plug in, then copy the `.uf2` again (Part 4). This always works. The chip cannot be bricked this way.
+- **Do not run `tinytouch update`.** It downloads firmware for the original ESP32 version of this project, which this board rejects. Update by rebuilding (Part 2) and copying the new `.uf2` (Part 4).
+
+## Words you might see
+
+- **UF2:** the firmware file format the board accepts when it shows up as a drive.
+- **BOOTSEL / BOOT:** the button that makes the board show up as the RPI-RP2 drive.
+- **PIV:** the smart-card standard macOS uses for login.
+- **HID:** "keyboard mode".
+- **Helper:** a small program setup installs on your Mac that runs in the background and talks to the board. It starts automatically after login.
+
+## License and credit
+
+MIT, see [LICENSE](LICENSE). The protocol, PIV applet, macOS helper, and CLI are the work of the upstream tinyTouch project.

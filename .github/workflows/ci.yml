@@ -5,6 +5,19 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      fp_tx_pin:
+        description: "Board pin wired to the sensor RX (GP number: 0, 4, 8, 12, or 28)"
+        required: false
+        default: ""
+      fp_rx_pin:
+        description: "Board pin wired to the sensor TX (GP number: 1, 5, 9, 13, or 29)"
+        required: false
+        default: ""
+      fp_int_pin:
+        description: "Board pin wired to the sensor TouchOut (any free GP number)"
+        required: false
+        default: ""
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -35,9 +48,21 @@ jobs:
       - name: Create ephemeral firmware signing key
         run: openssl genrsa -out firmware/tiny_touch_unified/secure_boot_signing_key.pem 3072 2>/dev/null
       - name: Build factory firmware
+        env:
+          FP_TX_PIN: ${{ inputs.fp_tx_pin }}
+          FP_RX_PIN: ${{ inputs.fp_rx_pin }}
+          FP_INT_PIN: ${{ inputs.fp_int_pin }}
         run: |
+          pins=()
+          for name in TX RX INT; do
+            value="$(eval "printf '%s' \"\${FP_${name}_PIN:-}\"")"
+            [[ -z "$value" ]] && continue
+            [[ "$value" =~ ^[0-9]+$ ]] || { echo "fp_${name,,}_pin must be a GP number, got: $value" >&2; exit 1; }
+            pins+=("-DTINYTOUCH_FP_${name}_PIN=$value")
+            echo "Sensor ${name} pin: GP$value"
+          done
           cmake -S firmware/tiny_touch_unified -B firmware/tiny_touch_unified/build -G Ninja \
-            -DPICO_SDK_PATH="$PWD/pico-sdk" -DCMAKE_BUILD_TYPE=Release
+            -DPICO_SDK_PATH="$PWD/pico-sdk" -DCMAKE_BUILD_TYPE=Release "${pins[@]}"
           cmake --build firmware/tiny_touch_unified/build --parallel
       - name: Assemble and verify firmware artifacts
         run: |
