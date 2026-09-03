@@ -67,12 +67,13 @@ class ProtocolSixTests(unittest.TestCase):
         )
 
     def test_cli_update_pins_installer_and_firmware_to_one_release(self):
-        root = "https://github.com/ZimengXiong/tinyTouch/releases/download/v0.1.14-prod"
-        manifest = {"version": "0.1.14-prod", "ota": {}}
+        target_version = "9.9.9-prod"
+        root = f"https://github.com/ZimengXiong/tinyTouch/releases/download/v{target_version}"
+        manifest = {"version": target_version, "ota": {}}
         args = SimpleNamespace(port=None, firmware_only=False, release_version=None)
         installer_result = SimpleNamespace(returncode=0)
         version_result = SimpleNamespace(
-            returncode=0, stdout="tinyTouch CLI 0.1.14-prod\n"
+            returncode=0, stdout=f"tinyTouch CLI {target_version}\n"
         )
         with (
             mock.patch.object(cli, "update_release", return_value=(root, manifest)),
@@ -94,7 +95,7 @@ class ProtocolSixTests(unittest.TestCase):
                 "update",
                 "--firmware-only",
                 "--release-version",
-                "0.1.14-prod",
+                target_version,
             ],
         )
 
@@ -322,6 +323,7 @@ class ProtocolSixTests(unittest.TestCase):
             mock.patch.object(cli, "serial_command", side_effect=lambda _p, command, **_k: calls.append(command) or ["OK SET MODE"]),
             mock.patch.object(cli, "wait_for_reconnect", return_value=args.port),
             mock.patch.object(cli, "fresh_status", return_value={"mode": "hid"}),
+            mock.patch.object(cli, "install_helper"),
             mock.patch.object(cli, "notify"),
         ):
             cli.command_mode(args)
