@@ -87,6 +87,132 @@ def terminal_style(text: str, code: str) -> str:
     return f"\033[{code}m{text}\033[0m"
 
 
+ENROLLMENT_VIEWS = (
+    ("left", "left edge", "36"),
+    ("right", "right edge", "35"),
+    ("top", "top", "33"),
+    ("center", "center", "32"),
+)
+
+
+def fingerprint_oval(active: str | None, tap_index: int = 0) -> str:
+    """Draw one filled Braille oval with one region highlighted."""
+    rows = (
+        "        ttttttttt",
+        "      ttttttttttttt",
+        "    ttttttttttttttttt",
+        "  ttttttttttttttttttttt",
+        " llllllllcccccccrrrrrrrr",
+        "lllllllllcccccccrrrrrrrrr",
+        "lllllllllcccccccrrrrrrrrr",
+        "lllllllllcccccccrrrrrrrrr",
+        "lllllllllcccccccrrrrrrrrr",
+        "lllllllllcccccccrrrrrrrrr",
+        "lllllllllcccccccrrrrrrrrr",
+        " llllllllcccccccrrrrrrrr",
+        "  lllllllcccccccrrrrrrr",
+        "    lllllcccccccrrrrr",
+        "      lllcccccccrrr",
+        "        lcccccccr",
+    )
+    zone_for_marker = {"l": "left", "r": "right", "t": "top", "c": "center"}
+    color_enabled = (
+        sys.stdout.isatty()
+        and os.environ.get("NO_COLOR") is None
+        and os.environ.get("TERM") != "dumb"
+    )
+    highlight_colors = ("36", "32")
+    highlight_glyphs = ("▓", "▒")
+    rendered = []
+    for row_index, row in enumerate(rows):
+        line = []
+        for character in row:
+            zone = zone_for_marker.get(character)
+            if zone is None:
+                line.append(character)
+            elif zone == active:
+                if color_enabled:
+                    line.append(terminal_style("⣿", f"1;{highlight_colors[tap_index]}"))
+                else:
+                    line.append(highlight_glyphs[tap_index])
+            else:
+                line.append("⣿")
+        repeat = f"   {terminal_style('×2', '1')}" if row_index == len(rows) // 2 else ""
+        rendered.append("".join(line) + repeat)
+    return "\n".join(rendered)
+
+
+def show_enrollment_view(
+    view_index: int, tap_index: int, active: bool = True, demo: bool = False,
+) -> None:
+    """Render one frame of fingerprint enrollment."""
+    zone, label, _color = ENROLLMENT_VIEWS[view_index]
+    sys.stdout.write("\033[2J\033[H")
+    say(terminal_style("Fingerprint enrollment", "1"))
+    say(
+        f"View {view_index + 1} of {len(ENROLLMENT_VIEWS)}"
+        f"  ·  Tap {tap_index + 1} of 2"
+    )
+    say("")
+    say(fingerprint_oval(zone if active else None, tap_index))
+    say("")
+    if not active:
+        say("Lift your finger.")
+    elif tap_index == 0:
+        say(
+            f"Tap the sensor with the {terminal_style(label, '1')} of your finger, "
+            "then lift it."
+        )
+    else:
+        say(
+            f"Tap the sensor with the {terminal_style(label, '1')} "
+            "of your finger again."
+        )
+    if demo:
+        say(terminal_style("Tab: simulate tap    q: exit", "2"))
+
+
+def show_enrollment_event(view_index: int, event: str) -> None:
+    """Map firmware enrollment events to their matching visual state."""
+    states = {
+        "EVENT TOUCH": (0, True),
+        "EVENT LIFT": (0, False),
+        "EVENT TOUCH_AGAIN": (1, True),
+    }
+    state = states.get(event)
+    if state is not None:
+        show_enrollment_view(view_index, *state)
+
+
+def command_enroll_demo(_args: argparse.Namespace) -> None:
+    """Preview fingerprint enrollment without opening a device."""
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        raise ToolError("The enrollment demo needs an interactive Terminal.")
+    view_index = 0
+    tap_index = 0
+    previous = tty.tcgetattr(sys.stdin.fileno()) if hasattr(tty, "tcgetattr") else None
+    try:
+        tty.setcbreak(sys.stdin.fileno())
+        while True:
+            show_enrollment_view(view_index, tap_index, demo=True)
+            key = os.read(sys.stdin.fileno(), 1)
+            if key in {b"q", b"Q", b"\x03", b"\x1b", b"\r", b"\n"}:
+                break
+            if key == b"\t":
+                if tap_index == 0:
+                    show_enrollment_view(view_index, tap_index, active=False, demo=True)
+                    time.sleep(0.35)
+                    tap_index = 1
+                else:
+                    tap_index = 0
+                    view_index = (view_index + 1) % len(ENROLLMENT_VIEWS)
+    finally:
+        if previous is not None:
+            tty.tcsetattr(sys.stdin.fileno(), tty.TCSADRAIN, previous)
+        sys.stdout.write("\033[2J\033[H")
+        sys.stdout.flush()
+
+
 def show_startup_mark(command: str) -> None:
     """Show the original Alpaca mark and one command section divider."""
     if not sys.stdout.isatty():
@@ -409,6 +535,7 @@ def exchange_serial(
     lift_prompt: str | None = "Lift your finger from the sensor.",
     touch_again_prompt: str | None = None,
     wait_message: str | None = None,
+    event_handler=None,
 ) -> list[str]:
     lines: list[str] = []
     touch_prompted = False
@@ -437,7 +564,11 @@ def exchange_serial(
                 continue
             lines.append(line)
             verbose("device: " + line)
-            if line == "EVENT TOUCH" and not touch_prompted:
+            if line.startswith("EVENT ") and event_handler is not None:
+                event_handler(line)
+                if line == "EVENT TOUCH":
+                    touch_prompted = True
+            elif line == "EVENT TOUCH" and not touch_prompted:
                 say(touch_prompt or "Touch the fingerprint sensor now.")
                 touch_prompted = True
             elif line == "EVENT LIFT" and lift_prompt:
@@ -507,13 +638,14 @@ def serial_command(
     lift_prompt: str | None = "Lift your finger from the sensor.",
     touch_again_prompt: str | None = None,
     wait_message: str | None = None,
+    event_handler=None,
 ) -> list[str]:
     if _active_serial is not None:
         try:
             return exchange_serial(
                 _active_serial, command, timeout=timeout, touch_prompt=touch_prompt,
                 lift_prompt=lift_prompt, touch_again_prompt=touch_again_prompt,
-                wait_message=wait_message,
+                wait_message=wait_message, event_handler=event_handler,
             )
         except Exception as exc:
             if "Device not configured" in str(exc):
@@ -527,7 +659,7 @@ def serial_command(
             return exchange_serial(
                 _active_serial, command, timeout=timeout, touch_prompt=touch_prompt,
                 lift_prompt=lift_prompt, touch_again_prompt=touch_again_prompt,
-                wait_message=wait_message,
+                wait_message=wait_message, event_handler=event_handler,
             )
     except Exception as exc:
         if "Device not configured" in str(exc):
@@ -781,9 +913,10 @@ def enroll(port: str, skip: bool) -> None:
             raise ToolError("Fingerprint enrollment was not changed.")
     say("")
     unlock(port, reason="start fingerprint enrollment")
-    views = ("left edge", "right edge", "top", "center")
-    for slot, view in enumerate(views, 1):
-        say("")
+    visual = sys.stdout.isatty()
+    for slot, (_zone, view, _color) in enumerate(ENROLLMENT_VIEWS, 1):
+        if not visual:
+            say("")
         serial_command(
             port,
             f"FINGER ENROLL {slot}",
@@ -796,7 +929,13 @@ def enroll(port: str, skip: bool) -> None:
             touch_again_prompt=(
                 f"Tap the fingerprint sensor with the {view} of your finger again."
             ),
+            event_handler=(
+                lambda event, view_index=slot - 1: show_enrollment_event(view_index, event)
+            ) if visual else None,
         )
+    if visual:
+        sys.stdout.write("\033[2J\033[H")
+        say("Fingerprint enrollment complete.")
     current = status(port)
     if current.get("fingerprints") != "4":
         raise ToolError("Live verification failed: the four-view fingerprint profile was not reported.")
@@ -951,7 +1090,19 @@ def command_enroll(args: argparse.Namespace) -> None:
     protocol6(device)
     sensor_ready(device)
     unlock(port, reason="add this fingerprint")
-    serial_command(port, f"FINGER ENROLL {args.slot}", timeout=45)
+    visual = sys.stdout.isatty()
+    view_index = min(max(args.slot - 1, 0), len(ENROLLMENT_VIEWS) - 1)
+    serial_command(
+        port,
+        f"FINGER ENROLL {args.slot}",
+        timeout=45,
+        event_handler=(
+            lambda event: show_enrollment_event(view_index, event)
+        ) if visual else None,
+    )
+    if visual:
+        sys.stdout.write("\033[2J\033[H")
+        say("Fingerprint enrolled.")
     current = status(port)
     if int(current.get("fingerprints", "0")) < 1:
         raise ToolError("Live verification failed: the enrollment was not reported.")
@@ -1480,6 +1631,8 @@ def parser() -> argparse.ArgumentParser:
     pair.set_defaults(func=command_pair)
     hid_smoke = sub.add_parser("hid-smoke")
     hid_smoke.set_defaults(func=command_hid_smoke)
+    enroll_demo = sub.add_parser("enroll-demo", help=argparse.SUPPRESS)
+    enroll_demo.set_defaults(func=command_enroll_demo)
     return parser
 
 

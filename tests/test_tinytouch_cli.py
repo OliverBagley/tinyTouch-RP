@@ -85,6 +85,49 @@ class ProtocolSixTests(unittest.TestCase):
             all(call.kwargs["lift_prompt"] is None for call in command.call_args_list)
         )
 
+    def test_enrollment_events_follow_both_sensor_taps(self):
+        with mock.patch.object(cli, "show_enrollment_view") as view:
+            cli.show_enrollment_event(2, "EVENT TOUCH")
+            cli.show_enrollment_event(2, "EVENT LIFT")
+            cli.show_enrollment_event(2, "EVENT TOUCH_AGAIN")
+        self.assertEqual(
+            view.call_args_list,
+            [
+                mock.call(2, 0, True),
+                mock.call(2, 0, False),
+                mock.call(2, 1, True),
+            ],
+        )
+
+    def test_serial_events_reach_enrollment_ui_in_protocol_order(self):
+        class Device:
+            responses = iter(
+                (
+                    b"EVENT TOUCH\n",
+                    b"EVENT LIFT\n",
+                    b"EVENT TOUCH_AGAIN\n",
+                    b"OK FINGER\n",
+                )
+            )
+
+            def write(self, _payload):
+                pass
+
+            def flush(self):
+                pass
+
+            def readline(self):
+                return next(self.responses, b"")
+
+        events = []
+        cli.exchange_serial(
+            Device(), "FINGER ENROLL 1", timeout=1, event_handler=events.append,
+        )
+        self.assertEqual(
+            events,
+            ["EVENT TOUCH", "EVENT LIFT", "EVENT TOUCH_AGAIN"],
+        )
+
     def test_update_release_refetches_latest_from_immutable_version(self):
         latest = json.dumps({"version": "0.1.10-prod"}).encode()
         exact = json.dumps({"version": "0.1.10-prod", "ota": {}}).encode()
