@@ -124,7 +124,7 @@ def fingerprint_oval(active: str | None, tap_index: int = 0) -> str:
     highlight_colors = ("36", "32")
     highlight_glyphs = ("▓", "▒")
     rendered = []
-    for row_index, row in enumerate(rows):
+    for row in rows:
         line = []
         for character in row:
             zone = zone_for_marker.get(character)
@@ -137,9 +137,16 @@ def fingerprint_oval(active: str | None, tap_index: int = 0) -> str:
                     line.append(highlight_glyphs[tap_index])
             else:
                 line.append("⣿")
-        repeat = f"   {terminal_style('×2', '1')}" if row_index == len(rows) // 2 else ""
-        rendered.append("".join(line) + repeat)
+        rendered.append("".join(line))
     return "\n".join(rendered)
+
+
+def introduce_enrollment() -> None:
+    """Explain fingerprint enrollment before opening its full-screen view."""
+    say("")
+    say("Next, we’ll enroll different views of your fingerprint.")
+    say("Follow the instructions on the next screen.")
+    ask("Press Enter to continue.")
 
 
 def show_enrollment_view(
@@ -188,6 +195,7 @@ def command_enroll_demo(_args: argparse.Namespace) -> None:
     """Preview fingerprint enrollment without opening a device."""
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise ToolError("The enrollment demo needs an interactive Terminal.")
+    introduce_enrollment()
     view_index = 0
     tap_index = 0
     previous = tty.tcgetattr(sys.stdin.fileno()) if hasattr(tty, "tcgetattr") else None
@@ -914,6 +922,8 @@ def enroll(port: str, skip: bool) -> None:
     say("")
     unlock(port, reason="start fingerprint enrollment")
     visual = sys.stdout.isatty()
+    if visual and sys.stdin.isatty():
+        introduce_enrollment()
     for slot, (_zone, view, _color) in enumerate(ENROLLMENT_VIEWS, 1):
         if not visual:
             say("")
@@ -1091,6 +1101,8 @@ def command_enroll(args: argparse.Namespace) -> None:
     sensor_ready(device)
     unlock(port, reason="add this fingerprint")
     visual = sys.stdout.isatty()
+    if visual and sys.stdin.isatty():
+        introduce_enrollment()
     view_index = min(max(args.slot - 1, 0), len(ENROLLMENT_VIEWS) - 1)
     serial_command(
         port,
