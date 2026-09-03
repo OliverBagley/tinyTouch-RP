@@ -103,6 +103,7 @@ def authorize_macos() -> None:
     )
     if cached.returncode:
         say("Authorize macOS in this terminal.")
+        say("(Your typing is hidden, so no characters will appear.)")
         validated = subprocess.run(["sudo", "-v"], check=False)
         if validated.returncode:
             raise ToolError("macOS authorization failed.")
@@ -751,6 +752,7 @@ def command_setup(args: argparse.Namespace) -> None:
     # opening the CDC port. Keep that port open through the entire setup.
     remove_helper()
     piv_rescan_needed = False
+    created_piv_identities = None
     mode_changed = False
     with foreground_session(port):
         device = status(port)
@@ -782,7 +784,6 @@ def command_setup(args: argparse.Namespace) -> None:
                 say("Setting up PIV certificates. This may take a moment.")
                 unlock(
                     port,
-                    explain_pin=True,
                     reason="create your PIV identity",
                 )
                 serial_command(port, "PIV CREATE", timeout=45)
@@ -808,6 +809,14 @@ def command_setup(args: argparse.Namespace) -> None:
         command_setup(resumed)
         return
     if piv_rescan_needed:
+        say("")
+        created_piv_identities = wait_for_piv_identities(
+            timeout=30.0,
+            message=(
+                "Creating PIV identities. This may take up to 30 seconds. "
+                "Please do not touch the sensor."
+            ),
+        )
         device = fresh_status(port, {"piv": "ready"})
         enroll(port, args.skip_enroll)
         device = status(port)
@@ -820,10 +829,14 @@ def command_setup(args: argparse.Namespace) -> None:
         if not helper_loaded():
             raise ToolError("HID setup is incomplete: the helper is not loaded.")
     if mode == "piv" and not args.no_pair:
-        command_pair(args)
+        command_pair(
+            args,
+            identities=created_piv_identities,
+            separate_identity_list=created_piv_identities is not None,
+        )
     say("")
     if mode == "piv":
-        say("tinyTouch is ready in PIV mode. All changes are live; no restart is required.")
+        say("tinyTouch is ready in PIV mode.")
     else:
         say("tinyTouch is ready in HID mode.")
 
@@ -1224,12 +1237,14 @@ def explain_piv_pin() -> None:
     say("When macOS asks for the smart-card PIN, enter 111111.")
 
 
-def wait_for_piv_identities(timeout: float = 20.0) -> tuple[list[str], list[str]]:
-    """Wait for macOS smart-card discovery with a compact terminal spinner."""
-    message = (
+def wait_for_piv_identities(
+    timeout: float = 20.0,
+    message: str = (
         "Configuring PIV. This may take up to 20 seconds. "
         "Please do not touch the sensor."
-    )
+    ),
+) -> tuple[list[str], list[str]]:
+    """Wait for macOS smart-card discovery with a compact terminal spinner."""
     frames = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
     animated = sys.stdout.isatty()
     if not animated:
@@ -1251,9 +1266,14 @@ def wait_for_piv_identities(timeout: float = 20.0) -> tuple[list[str], list[str]
     return [], []
 
 
-def command_pair(args: argparse.Namespace) -> None:
+def command_pair(
+    args: argparse.Namespace,
+    *,
+    identities: tuple[list[str], list[str]] | None = None,
+    separate_identity_list: bool = False,
+) -> None:
     require_macos()
-    paired, available = wait_for_piv_identities()
+    paired, available = identities or wait_for_piv_identities()
     if paired:
         say("PIV is already paired with this Mac.")
         explain_piv_pin()
@@ -1261,6 +1281,8 @@ def command_pair(args: argparse.Namespace) -> None:
     if not available:
         raise ToolError("macOS has not discovered a PIV identity. Select PIV mode, then try again.")
     if len(available) > 1:
+        if separate_identity_list:
+            say("")
         say("Available PIV identities:")
         for index, identity in enumerate(available, 1):
             say(f"  {index}. {identity}")
