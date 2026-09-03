@@ -919,8 +919,10 @@ def enroll(port: str, skip: bool) -> None:
     if count == 4:
         return
     if count:
-        if ask("Replace the existing fingerprint enrollment? [y/N] ").lower() not in {"y", "yes"}:
-            raise ToolError("Fingerprint enrollment was not changed.")
+        say(f"The sensor already holds {count} fingerprint template(s). Only a finger that matches")
+        say("them can unlock this device, so on a new board they must be erased before yours is enrolled.")
+        if ask("Erase them and enroll your fingerprint now? [Y/n] ").lower() in {"n", "no"}:
+            raise ToolError("Fingerprint enrollment was not changed. Run setup again and answer Y to enroll.")
     say("")
     unlock(port, reason="start fingerprint enrollment")
     if count:
