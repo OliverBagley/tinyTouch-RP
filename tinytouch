@@ -98,22 +98,22 @@ ENROLLMENT_VIEWS = (
 def fingerprint_oval(active: str) -> str:
     """Draw one stable fingerprint oval with one region highlighted."""
     rows = (
-        "       _______",
-        "     /ttttttttt\\",
-        "    /ttttttttttt\\",
-        "   /ttttttttttttt\\",
-        "  /lllllcccccrrrrr\\",
-        " |llllllcccccrrrrrr|",
-        " |llllllcccccrrrrrr|",
-        " |llllllcccccrrrrrr|",
-        " |llllllcccccrrrrrr|",
-        " |llllllcccccrrrrrr|",
-        " |llllllcccccrrrrrr|",
-        "  \\lllllcccccrrrrr/",
-        "   \\llllcccccrrrr/",
-        "    \\lllcccccrrr/",
-        "     \\llcccccrr/",
-        "       ‾‾‾‾‾‾‾",
+        "          ___________",
+        "       /ttttttttttttttt\\",
+        "     /ttttttttttttttttttt\\",
+        "    /ttttttttttttttttttttt\\",
+        "   /llllllllcccccccrrrrrrrr\\",
+        "  |llllllllllcccccccrrrrrrrrrrr|",
+        "  |llllllllllcccccccrrrrrrrrrrr|",
+        "  |llllllllllcccccccrrrrrrrrrrr|",
+        "  |llllllllllcccccccrrrrrrrrrrr|",
+        "  |llllllllllcccccccrrrrrrrrrrr|",
+        "  |llllllllllcccccccrrrrrrrrrrr|",
+        "   \\llllllllcccccccrrrrrrrr/",
+        "    \\lllllllcccccccrrrrrrr/",
+        "     \\llllllcccccccrrrrrr/",
+        "       \\llllcccccccrrrr/",
+        "          ‾‾‾‾‾‾‾‾‾‾‾",
     )
     zone_for_marker = {"l": "left", "r": "right", "t": "top", "c": "center"}
     color_for_zone = {view: color for view, _label, color in ENROLLMENT_VIEWS}
