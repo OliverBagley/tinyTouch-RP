@@ -128,6 +128,20 @@ class ProtocolSixTests(unittest.TestCase):
             ["EVENT TOUCH", "EVENT LIFT", "EVENT TOUCH_AGAIN"],
         )
 
+    def test_enrollment_intro_precedes_the_full_screen_view(self):
+        with (
+            mock.patch.object(cli, "say") as output,
+            mock.patch.object(cli, "ask", return_value="") as ask,
+        ):
+            cli.introduce_enrollment()
+        text = "\n".join(call.args[0] for call in output.call_args_list)
+        self.assertIn("enroll different views of your fingerprint", text)
+        self.assertIn("instructions on the next screen", text)
+        ask.assert_called_once_with("Press Enter to continue.")
+
+    def test_enrollment_oval_has_no_repeat_badge(self):
+        self.assertNotIn("×2", cli.fingerprint_oval("left"))
+
     def test_update_release_refetches_latest_from_immutable_version(self):
         latest = json.dumps({"version": "0.1.10-prod"}).encode()
         exact = json.dumps({"version": "0.1.10-prod", "ota": {}}).encode()
