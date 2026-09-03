@@ -16,7 +16,6 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("release", type=Path)
     parser.add_argument("--arm64", type=Path, required=True)
-    parser.add_argument("--x86-64", type=Path, required=True)
     args = parser.parse_args()
     release = args.release.resolve()
     manifest_path = release / "release-manifest.json"
@@ -24,7 +23,6 @@ def main() -> None:
     manifest["cli"] = {}
     for key, source, name in (
         ("macos-arm64", args.arm64, "tinytouch-macos-arm64.tar.gz"),
-        ("macos-x86_64", args.x86_64, "tinytouch-macos-x86_64.tar.gz"),
     ):
         target = release / name
         shutil.copy2(source, target)

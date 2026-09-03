@@ -91,7 +91,6 @@ class ReleasePipelineTests(unittest.TestCase):
         cli = {}
         for key, name in (
             ("macos-arm64", "tinytouch-macos-arm64.tar.gz"),
-            ("macos-x86_64", "tinytouch-macos-x86_64.tar.gz"),
         ):
             path = root / name
             self.make_cli(path)

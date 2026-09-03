@@ -9,7 +9,7 @@ What you end up with: a tiny fingerprint reader that logs you into your Mac and 
 - A **Waveshare RP2040-Zero** board (a small purple board with a USB-C port).
 - A **ZW101 / ZW111 style fingerprint sensor** (the one with a 6-pin cable).
 - A **USB-C cable that carries data** (some cheap cables only charge; if in doubt, use the one that came with a phone).
-- A **Mac** (Apple silicon or Intel).
+- A **Mac with Apple silicon** (M1 or newer).
 - Six wires and a way to connect them (soldering iron, or a breadboard and jumper wires).
 
 ## Part 1: Get the tools onto your Mac (once)

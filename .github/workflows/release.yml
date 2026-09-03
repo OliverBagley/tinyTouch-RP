@@ -266,7 +266,7 @@ jobs:
           test -s dist/live-release.json
           test "$(jq -r .version dist/live-release.json)" = "${RELEASE_TAG#v}"
           test "$(jq -r .build dist/live-release.json)" = "${RELEASE_COMMIT:0:12}"
-          for platform in macos-arm64 macos-x86_64; do
+          for platform in macos-arm64; do
             file="$(jq -r --arg platform "$platform" '.cli[$platform].file' dist/live-release.json)"
             size="$(jq -r --arg platform "$platform" '.cli[$platform].size' dist/live-release.json)"
             sha256="$(jq -r --arg platform "$platform" '.cli[$platform].sha256' dist/live-release.json)"

@@ -225,11 +225,10 @@ def validate_release(root: Path, commit: str, *, flat: bool = False,
     if not require_cli:
         require(cli is None, "firmware-only release unexpectedly contains CLI metadata")
         return manifest
-    require(isinstance(cli, dict) and set(cli) == {"macos-arm64", "macos-x86_64"},
-            "release must contain both macOS CLI architectures")
+    require(isinstance(cli, dict) and set(cli) == {"macos-arm64"},
+            "release must contain the Apple silicon CLI")
     for key, name in (
         ("macos-arm64", "tinytouch-macos-arm64.tar.gz"),
-        ("macos-x86_64", "tinytouch-macos-x86_64.tar.gz"),
     ):
         metadata = cli[key]
         require(isinstance(metadata, dict) and metadata.get("file") == name and

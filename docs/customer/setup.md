@@ -1,6 +1,6 @@
 # Setup
 
-On an Apple silicon or Intel Mac:
+On an Apple silicon Mac:
 
 ```sh
 curl -fsSL https://github.com/ZimengXiong/tinyTouch/releases/latest/download/install.sh | sh

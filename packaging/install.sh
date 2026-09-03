@@ -17,8 +17,7 @@ if [ "$machine" = 'x86_64' ] && [ "$(/usr/sbin/sysctl -in sysctl.proc_translated
 fi
 case "$machine" in
   arm64) cli_key='macos-arm64'; expected_file='tinytouch-macos-arm64.tar.gz' ;;
-  x86_64) cli_key='macos-x86_64'; expected_file='tinytouch-macos-x86_64.tar.gz' ;;
-  *) echo "tinyTouch does not support this Mac architecture: $(uname -m)." >&2; exit 1 ;;
+  *) echo "tinyTouch supports Apple silicon Macs only (found $(uname -m))." >&2; exit 1 ;;
 esac
 
 curl -fsSL "$release_root/release-manifest.json" -o "$work_dir/release.json"
