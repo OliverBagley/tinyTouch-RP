@@ -239,6 +239,25 @@ class ProtocolSixTests(unittest.TestCase):
         self.assertEqual(calls, ["sudo", "touch"])
         self.assertTrue(unlock.call_args.kwargs["explain_pin"])
 
+    def test_piv_identity_selection_recommends_the_default(self):
+        identities = ["A" * 40, "B" * 40]
+        args = SimpleNamespace(port="/dev/cu.TT-1234")
+        with (
+            mock.patch.object(cli, "require_macos"),
+            mock.patch.object(
+                cli, "wait_for_piv_identities", return_value=([], identities)
+            ),
+            mock.patch.object(cli, "authorize_macos"),
+            mock.patch.object(cli, "choose_port", return_value=args.port),
+            mock.patch.object(cli, "unlock"),
+            mock.patch.object(cli, "run"),
+            mock.patch.object(cli, "ask", return_value="1"),
+            mock.patch.object(cli, "say") as output,
+        ):
+            cli.command_pair(args)
+        text = "\n".join(call.args[0] for call in output.call_args_list)
+        self.assertIn("If you are not sure, select 1.", text)
+
     def test_piv_unlock_prints_pin_before_macos_can_prompt(self):
         with (
             mock.patch.object(

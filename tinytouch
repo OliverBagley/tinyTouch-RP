@@ -1211,16 +1211,36 @@ def explain_piv_pin() -> None:
     say("When macOS asks for the smart-card PIN, enter 111111.")
 
 
+def wait_for_piv_identities(timeout: float = 20.0) -> tuple[list[str], list[str]]:
+    """Wait for macOS smart-card discovery with a compact terminal spinner."""
+    message = (
+        "Configuring PIV. This may take up to 20 seconds. "
+        "Please do not touch the sensor."
+    )
+    frames = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+    animated = sys.stdout.isatty()
+    if not animated:
+        say(message)
+    deadline = time.monotonic() + timeout
+    frame = 0
+    try:
+        while time.monotonic() < deadline:
+            if animated:
+                print(f"\r{frames[frame % len(frames)]} {message}", end="", flush=True)
+                frame += 1
+            paired, available = piv_identities()
+            if paired or available:
+                return paired, available
+            time.sleep(0.25)
+    finally:
+        if animated:
+            print("\r\033[2K", end="", flush=True)
+    return [], []
+
+
 def command_pair(args: argparse.Namespace) -> None:
     require_macos()
-    deadline = time.monotonic() + 10.0
-    paired: list[str] = []
-    available: list[str] = []
-    while time.monotonic() < deadline:
-        paired, available = piv_identities()
-        if paired or available:
-            break
-        time.sleep(0.25)
+    paired, available = wait_for_piv_identities()
     if paired:
         say("PIV is already paired with this Mac.")
         explain_piv_pin()
@@ -1231,6 +1251,7 @@ def command_pair(args: argparse.Namespace) -> None:
         say("Available PIV identities:")
         for index, identity in enumerate(available, 1):
             say(f"  {index}. {identity}")
+        say("If you are not sure, select 1.")
         choice = ask("Identity [1]: ") or "1"
         try:
             identity = available[int(choice) - 1]
