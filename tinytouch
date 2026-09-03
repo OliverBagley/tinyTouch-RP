@@ -95,7 +95,7 @@ ENROLLMENT_VIEWS = (
 )
 
 
-def fingerprint_oval(active: str) -> str:
+def fingerprint_oval(active: str | None, tap_index: int = 0) -> str:
     """Draw one filled Braille oval with one region highlighted."""
     rows = (
         "        ttttttttt",
@@ -116,14 +116,15 @@ def fingerprint_oval(active: str) -> str:
         "        lcccccccr",
     )
     zone_for_marker = {"l": "left", "r": "right", "t": "top", "c": "center"}
-    color_for_zone = {view: color for view, _label, color in ENROLLMENT_VIEWS}
     color_enabled = (
         sys.stdout.isatty()
         and os.environ.get("NO_COLOR") is None
         and os.environ.get("TERM") != "dumb"
     )
+    highlight_colors = ("36", "32")
+    highlight_glyphs = ("▓", "▒")
     rendered = []
-    for row in rows:
+    for row_index, row in enumerate(rows):
         line = []
         for character in row:
             zone = zone_for_marker.get(character)
@@ -131,13 +132,41 @@ def fingerprint_oval(active: str) -> str:
                 line.append(character)
             elif zone == active:
                 if color_enabled:
-                    line.append(terminal_style("⣿", f"1;{color_for_zone[zone]}"))
+                    line.append(terminal_style("⣿", f"1;{highlight_colors[tap_index]}"))
                 else:
-                    line.append("▓")
+                    line.append(highlight_glyphs[tap_index])
             else:
                 line.append("⣿")
-        rendered.append("".join(line))
+        repeat = f"   {terminal_style('×2', '1')}" if row_index == len(rows) // 2 else ""
+        rendered.append("".join(line) + repeat)
     return "\n".join(rendered)
+
+
+def show_enroll_demo(view_index: int, tap_index: int, active: bool = True) -> None:
+    """Render one frame of the local enrollment preview."""
+    zone, label, _color = ENROLLMENT_VIEWS[view_index]
+    sys.stdout.write("\033[2J\033[H")
+    say(terminal_style("Fingerprint enrollment", "1"))
+    say(
+        f"View {view_index + 1} of {len(ENROLLMENT_VIEWS)}"
+        f"  ·  Tap {tap_index + 1} of 2"
+    )
+    say("")
+    say(fingerprint_oval(zone if active else None, tap_index))
+    say("")
+    if not active:
+        say("Lift your finger.")
+    elif tap_index == 0:
+        say(
+            f"Tap the sensor with the {terminal_style(label, '1')} of your finger, "
+            "then lift it."
+        )
+    else:
+        say(
+            f"Tap the sensor with the {terminal_style(label, '1')} "
+            "of your finger again."
+        )
+    say(terminal_style("Tab: simulate tap    q: exit", "2"))
 
 
 def command_enroll_demo(_args: argparse.Namespace) -> None:
@@ -150,32 +179,14 @@ def command_enroll_demo(_args: argparse.Namespace) -> None:
     try:
         tty.setcbreak(sys.stdin.fileno())
         while True:
-            zone, label, _color = ENROLLMENT_VIEWS[view_index]
-            sys.stdout.write("\033[2J\033[H")
-            say(terminal_style("Fingerprint enrollment", "1"))
-            say(
-                f"View {view_index + 1} of {len(ENROLLMENT_VIEWS)}"
-                f"  ·  Tap {tap_index + 1} of 2"
-            )
-            say("")
-            say(fingerprint_oval(zone))
-            say("")
-            if tap_index == 0:
-                say(
-                    f"Tap the sensor with the {terminal_style(label, '1')} of your finger, "
-                    "then lift it."
-                )
-            else:
-                say(
-                    f"Tap the sensor with the {terminal_style(label, '1')} "
-                    "of your finger again."
-                )
-            say(terminal_style("Tab: simulate tap    q: exit", "2"))
+            show_enroll_demo(view_index, tap_index)
             key = os.read(sys.stdin.fileno(), 1)
             if key in {b"q", b"Q", b"\x03", b"\x1b", b"\r", b"\n"}:
                 break
             if key == b"\t":
                 if tap_index == 0:
+                    show_enroll_demo(view_index, tap_index, active=False)
+                    time.sleep(0.35)
                     tap_index = 1
                 else:
                     tap_index = 0
