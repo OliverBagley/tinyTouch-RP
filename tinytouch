@@ -112,7 +112,9 @@ def authorize_macos() -> None:
 def prepare_hid_password() -> None:
     """Capture the HID password and unlock Keychain without requiring sudo."""
     global _setup_password
-    entered = bytearray(getpass.getpass("Mac password: ").encode("utf-8"))
+    say("Please type your Mac password.")
+    say("(Your typing is hidden, so no characters will appear.)")
+    entered = bytearray(getpass.getpass("Password: ").encode("utf-8"))
     if not entered:
         raise ToolError("A Mac password is required for HID mode.")
     try:
@@ -182,7 +184,10 @@ def ask(prompt: str) -> str:
 def choose_mode(value: str | None) -> str:
     if value in {"hid", "piv"}:
         return value
-    answer = ask("Choose mode: [h] HID or [p] PIV: ").lower()
+    say("Choose mode:")
+    say("  HID — Types your password into the active field and works anywhere it is accepted.")
+    say("  PIV — Acts as a smart card. It works only with supported login, sudo, and System Settings prompts.")
+    answer = ask("Mode [h/p]: ").lower()
     if answer in {"h", "hid"}:
         return "hid"
     if answer in {"p", "piv"}:
@@ -360,7 +365,9 @@ def install_helper() -> None:
         raise ToolError("The HID helper did not load.")
 
 
-def exchange_serial(device, command: str, *, timeout: float) -> list[str]:
+def exchange_serial(
+    device, command: str, *, timeout: float, touch_prompt: str | None = None,
+) -> list[str]:
     lines: list[str] = []
     touch_prompted = False
     device.write((command + "\n").encode("ascii"))
@@ -376,11 +383,13 @@ def exchange_serial(device, command: str, *, timeout: float) -> list[str]:
         lines.append(line)
         verbose("device: " + line)
         if line == "EVENT TOUCH" and not touch_prompted:
-            say("Touch the fingerprint sensor now.")
+            say(touch_prompt or "Touch the fingerprint sensor now.")
             touch_prompted = True
         elif line == "EVENT LIFT":
             say("Lift your finger from the sensor.")
         elif line == "EVENT TOUCH_AGAIN":
+            if touch_prompt:
+                say("")
             say("Touch the same finger again now.")
         if is_terminal(command, line):
             break
@@ -434,10 +443,15 @@ def foreground_session(port: str):
             load_helper()
 
 
-def serial_command(port: str, command: str, *, timeout: float = 20.0) -> list[str]:
+def serial_command(
+    port: str, command: str, *, timeout: float = 20.0,
+    touch_prompt: str | None = None,
+) -> list[str]:
     if _active_serial is not None:
         try:
-            return exchange_serial(_active_serial, command, timeout=timeout)
+            return exchange_serial(
+                _active_serial, command, timeout=timeout, touch_prompt=touch_prompt,
+            )
         except Exception as exc:
             if "Device not configured" in str(exc):
                 raise ToolError(
@@ -447,7 +461,9 @@ def serial_command(port: str, command: str, *, timeout: float = 20.0) -> list[st
             raise
     try:
         with foreground_session(port):
-            return exchange_serial(_active_serial, command, timeout=timeout)
+            return exchange_serial(
+                _active_serial, command, timeout=timeout, touch_prompt=touch_prompt,
+            )
     except Exception as exc:
         if "Device not configured" in str(exc):
             raise ToolError(
@@ -553,8 +569,6 @@ def host_id(key: bytes) -> str:
 
 def password_for(account: str) -> str:
     global _setup_password
-    say("HID mode types this password after a fingerprint match.")
-    say("It is stored in this Mac user's Keychain for this device.")
     if _setup_password is not None:
         try:
             value = _setup_password.decode("utf-8")
@@ -688,15 +702,20 @@ def enroll(port: str, skip: bool) -> None:
         return
     count = int(current.get("fingerprints", "0"))
     if count == 4:
-        say("The four-view fingerprint profile is already enrolled.")
         return
     if count:
         if ask("Replace the existing fingerprint enrollment? [y/N] ").lower() not in {"y", "yes"}:
             raise ToolError("Fingerprint enrollment was not changed.")
     unlock(port)
-    for slot in range(1, 5):
-        say(f"Touch the sensor for view {slot} of 4.")
-        serial_command(port, f"FINGER ENROLL {slot}", timeout=45)
+    views = ("left edge", "right edge", "top", "center")
+    for slot, view in enumerate(views, 1):
+        say("")
+        serial_command(
+            port,
+            f"FINGER ENROLL {slot}",
+            timeout=45,
+            touch_prompt=f"Touch the fingerprint sensor with the {view} of your finger.",
+        )
     current = status(port)
     if current.get("fingerprints") != "4":
         raise ToolError("Live verification failed: the four-view fingerprint profile was not reported.")
@@ -746,10 +765,10 @@ def command_setup(args: argparse.Namespace) -> None:
             sensor_ready(device)
             device = status(port)
     if mode_changed:
-        notify("tinyTouch mode changed", "Unplug tinyTouch and reconnect it normally.")
+        notify("tinyTouch mode changed", "Reconnect tinyTouch for the new mode to apply.")
         say(f"{mode.upper()} mode was selected.")
-        say("Unplug tinyTouch and reconnect it normally.")
-        say("Waiting for the device...")
+        say("Please unplug tinyTouch and reconnect it for the new mode to apply.")
+        say("Waiting for the device to disconnect...")
         reconnected_port = wait_for_reconnect(port)
         say("Device reconnected. Continuing setup...")
         resumed = argparse.Namespace(**vars(args))
@@ -771,7 +790,7 @@ def command_setup(args: argparse.Namespace) -> None:
             raise ToolError("HID setup is incomplete: the helper is not loaded.")
     if mode == "piv" and not args.no_pair:
         command_pair(args)
-    say(f"tinyTouch is ready in {mode.upper()} mode. All changes are live; no restart is required.")
+    say(f"tinyTouch is ready in {mode.upper()} mode.")
 
 
 def command_mode(args: argparse.Namespace) -> None:
@@ -782,10 +801,10 @@ def command_mode(args: argparse.Namespace) -> None:
     serial_command(port, f"SET MODE {args.mode.upper()}", timeout=4)
     if args.mode == "piv":
         remove_helper()
-    notify("tinyTouch mode changed", "Unplug tinyTouch and reconnect it normally.")
+    notify("tinyTouch mode changed", "Reconnect tinyTouch for the new mode to apply.")
     say(f"{args.mode.upper()} mode was selected.")
-    say("Unplug tinyTouch and reconnect it normally.")
-    say("Waiting for the device...")
+    say("Please unplug tinyTouch and reconnect it for the new mode to apply.")
+    say("Waiting for the device to disconnect...")
     reconnected_port = wait_for_reconnect(port)
     fresh_status(reconnected_port, {"mode": args.mode.lower()})
     if args.mode == "hid":
@@ -880,7 +899,7 @@ def command_factory_reset(args: argparse.Namespace) -> None:
     account = device_account(port)
     keychain_delete(PAIRING_SERVICE, account)
     keychain_delete(PASSWORD_SERVICE, account)
-    say("Factory reset completed live. The device did not restart.")
+    say("Factory reset completed.")
 
 
 def response_next(lines: list[str], verb: str) -> int:
