@@ -1176,7 +1176,7 @@ def command_update(args: argparse.Namespace) -> None:
     stage_ota(port, image, digest)
     notify("tinyTouch update staged", "Unplug tinyTouch, reconnect it, then run tinytouch status.")
     say("OTA firmware is staged in the inactive slot.")
-    say("Unplug tinyTouch and reconnect it once to boot the new firmware, then run 'tinytouch status'.")
+    say("Unplug tinyTouch and reconnect it once to boot the new firmware.")
 
 
 def command_rom(args: argparse.Namespace) -> None:
