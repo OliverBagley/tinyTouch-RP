@@ -21,6 +21,25 @@ loader.exec_module(cli)
 
 
 class ProtocolSixTests(unittest.TestCase):
+    def test_startup_mark_shows_version_and_command_section(self):
+        with (
+            mock.patch.object(cli.sys.stdout, "isatty", return_value=True),
+            mock.patch.dict(cli.os.environ, {}, clear=True),
+            mock.patch.object(cli, "say") as output,
+        ):
+            cli.show_startup_mark("factory-reset")
+        text = "\n".join(call.args[0] for call in output.call_args_list)
+        self.assertIn("⣰⣷⣼⣇", text)
+        self.assertIn(cli.CLI_VERSION, text)
+        self.assertIn("Factory Reset", text)
+
+    def test_terminal_style_respects_no_color(self):
+        with (
+            mock.patch.object(cli.sys.stdout, "isatty", return_value=True),
+            mock.patch.dict(cli.os.environ, {"NO_COLOR": "1"}, clear=True),
+        ):
+            self.assertEqual(cli.terminal_style("Setup", "36"), "Setup")
+
     def test_mode_prompt_explains_hid_and_piv(self):
         with (
             mock.patch.object(cli, "say") as output,
@@ -255,6 +274,50 @@ class ProtocolSixTests(unittest.TestCase):
         self.assertEqual(calls, ["sudo", "touch"])
         self.assertTrue(unlock.call_args.kwargs["explain_pin"])
 
+    def test_piv_pair_explains_rejected_legacy_identity(self):
+        identity = "A" * 40
+        args = SimpleNamespace(port="/dev/cu.TT-1234")
+        with (
+            mock.patch.object(cli, "require_macos"),
+            mock.patch.object(
+                cli, "wait_for_piv_identities", return_value=([], [identity])
+            ),
+            mock.patch.object(cli, "authorize_macos"),
+            mock.patch.object(cli, "choose_port", return_value=args.port),
+            mock.patch.object(cli, "unlock"),
+            mock.patch.object(
+                cli, "run", side_effect=cli.ToolError("CryptoTokenKit error -8")
+            ),
+            mock.patch.object(cli, "piv_identities", return_value=([], [identity])),
+        ):
+            with self.assertRaisesRegex(
+                cli.ToolError, "macOS rejected this PIV identity"
+            ):
+                cli.command_pair(args)
+
+    def test_piv_pair_reports_missing_keychain_wrapping(self):
+        identity = "A" * 40
+        args = SimpleNamespace(port="/dev/cu.TT-1234")
+        result = SimpleNamespace(
+            stdout=(
+                "User was successfully paired but user password will be required "
+                "after next SmartCard login to unlock Login keychain."
+            ),
+            stderr="",
+        )
+        with (
+            mock.patch.object(cli, "require_macos"),
+            mock.patch.object(
+                cli, "wait_for_piv_identities", return_value=([], [identity])
+            ),
+            mock.patch.object(cli, "authorize_macos"),
+            mock.patch.object(cli, "choose_port", return_value=args.port),
+            mock.patch.object(cli, "unlock"),
+            mock.patch.object(cli, "run", return_value=result),
+        ):
+            with self.assertRaisesRegex(cli.ToolError, "Login Keychain unlock"):
+                cli.command_pair(args)
+
     def test_piv_identity_selection_recommends_the_default(self):
         identities = ["A" * 40, "B" * 40]
         args = SimpleNamespace(port="/dev/cu.TT-1234")
@@ -317,6 +380,10 @@ class ProtocolSixTests(unittest.TestCase):
         self.assertTrue(pair.call_args.kwargs["separate_identity_list"])
         self.assertIn(
             "tinyTouch is ready in PIV mode.",
+            [call.args[0] for call in output.call_args_list],
+        )
+        self.assertIn(
+            "Setting up PIV certificates. This may take up to 30 seconds.",
             [call.args[0] for call in output.call_args_list],
         )
 

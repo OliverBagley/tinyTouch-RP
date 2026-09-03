@@ -79,7 +79,7 @@ static TickType_t pin_verified_until;
 static TickType_t user_presence_until;
 static uint8_t user_presence_slots_used;
 
-#define PIV_IDENTITY_SCHEMA 2
+#define PIV_IDENTITY_SCHEMA 3
 
 static bool deadline_active(TickType_t deadline, TickType_t maximum_window) {
   if (deadline == 0) return false;
@@ -159,7 +159,7 @@ static bool write_identity_part(nvs_handle_t handle, const char *name,
 }
 
 static bool create_certificate(mbedtls_pk_context *key, char *output,
-                               size_t output_size) {
+                               size_t output_size, bool key_management) {
   uint8_t serial_bytes[16];
   static const unsigned char client_auth_oid[] = MBEDTLS_OID_CLIENT_AUTH;
   mbedtls_asn1_sequence client_auth = {
@@ -176,19 +176,27 @@ static bool create_certificate(mbedtls_pk_context *key, char *output,
   int result = 0;
   mbedtls_x509write_crt_set_subject_key(&certificate, key);
   mbedtls_x509write_crt_set_issuer_key(&certificate, key);
+  const char *name = key_management
+      ? "CN=tinyTouch PIV Key Management"
+      : "CN=tinyTouch PIV Authentication";
   if (result == 0) result = mbedtls_x509write_crt_set_subject_name(
-      &certificate, "CN=tinyTouch PIV");
+      &certificate, name);
   if (result == 0) result = mbedtls_x509write_crt_set_issuer_name(
-      &certificate, "CN=tinyTouch PIV");
+      &certificate, name);
   if (result == 0) result = mbedtls_x509write_crt_set_validity(
       &certificate, "20260101000000", "20460101000000");
   if (result == 0) result = mbedtls_x509write_crt_set_serial_raw(
       &certificate, serial_bytes, sizeof(serial_bytes));
   if (result == 0) mbedtls_x509write_crt_set_md_alg(&certificate, MBEDTLS_MD_SHA256);
   if (result == 0) result = mbedtls_x509write_crt_set_basic_constraints(&certificate, 0, -1);
+  int key_usage = key_management
+      ? MBEDTLS_X509_KU_KEY_ENCIPHERMENT
+      : MBEDTLS_X509_KU_DIGITAL_SIGNATURE;
   if (result == 0) result = mbedtls_x509write_crt_set_key_usage(
-      &certificate, MBEDTLS_X509_KU_DIGITAL_SIGNATURE | MBEDTLS_X509_KU_KEY_ENCIPHERMENT);
-  if (result == 0) result = mbedtls_x509write_crt_set_ext_key_usage(&certificate, &client_auth);
+      &certificate, key_usage);
+  if (result == 0 && !key_management) {
+    result = mbedtls_x509write_crt_set_ext_key_usage(&certificate, &client_auth);
+  }
   if (result == 0) result = mbedtls_x509write_crt_pem(
       &certificate, (unsigned char *)output, output_size, piv_rng, NULL);
   secure_wipe(serial_bytes, sizeof(serial_bytes));
@@ -197,13 +205,15 @@ static bool create_certificate(mbedtls_pk_context *key, char *output,
 }
 
 static bool create_key_and_certificate(char *key_pem, size_t key_size,
-                                       char *certificate_pem, size_t certificate_size) {
+                                       char *certificate_pem, size_t certificate_size,
+                                       bool key_management) {
   mbedtls_pk_context key;
   mbedtls_pk_init(&key);
   int result = mbedtls_pk_setup(&key, mbedtls_pk_info_from_type(MBEDTLS_PK_RSA));
   if (result == 0) result = mbedtls_rsa_gen_key(mbedtls_pk_rsa(key), piv_rng, NULL, 2048, 65537);
   if (result == 0) result = mbedtls_pk_write_key_pem(&key, (unsigned char *)key_pem, key_size);
-  bool ok = result == 0 && create_certificate(&key, certificate_pem, certificate_size);
+  bool ok = result == 0 && create_certificate(
+      &key, certificate_pem, certificate_size, key_management);
   mbedtls_pk_free(&key);
   return ok;
 }
@@ -214,9 +224,9 @@ bool piv_create_identity(void) {
   // the task does not overflow its stack with four multi-kilobyte buffers.
   wipe_stored_identity();
   bool ok = create_key_and_certificate(stored_key_9a, sizeof(stored_key_9a),
-                                       stored_cert_9a, sizeof(stored_cert_9a)) &&
+                                       stored_cert_9a, sizeof(stored_cert_9a), false) &&
             create_key_and_certificate(stored_key_9d, sizeof(stored_key_9d),
-                                       stored_cert_9d, sizeof(stored_cert_9d));
+                                       stored_cert_9d, sizeof(stored_cert_9d), true);
   nvs_handle_t handle;
   if (ok && nvs_open("piv_keys", NVS_READWRITE, &handle) == ESP_OK) {
     ok = write_identity_part(handle, "cert9a", stored_cert_9a) &&
