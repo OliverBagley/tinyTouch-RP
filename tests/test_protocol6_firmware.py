@@ -64,6 +64,18 @@ class ProtocolSixFirmwareTests(unittest.TestCase):
         self.assertIn("piv_create_identity", piv)
         self.assertIn("piv_reload_keys()", piv)
 
+    def test_piv_certificates_separate_login_and_keychain_usage(self) -> None:
+        piv = self.source("piv.c")
+        self.assertIn("#define PIV_IDENTITY_SCHEMA 3", piv)
+        self.assertIn("MBEDTLS_X509_KU_KEY_ENCIPHERMENT", piv)
+        self.assertIn("MBEDTLS_X509_KU_DIGITAL_SIGNATURE", piv)
+        self.assertIn("if (result == 0 && !key_management)", piv)
+        self.assertNotIn(
+            "MBEDTLS_X509_KU_DIGITAL_SIGNATURE | "
+            "MBEDTLS_X509_KU_KEY_ENCIPHERMENT",
+            piv,
+        )
+
     def test_fingerprint_auth_requires_presence(self) -> None:
         source = self.source("touch_pin_hid.c")
         self.assertIn("if (!present || !runtime.presence_armed)", source)
