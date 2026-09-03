@@ -1234,7 +1234,7 @@ def paired_piv_identities() -> list[str]:
 
 
 def explain_piv_pin() -> None:
-    say("When macOS asks for the smart-card PIN, enter 111111.")
+    say("If macOS asks for the smart-card PIN, enter 111111.")
 
 
 def wait_for_piv_identities(
