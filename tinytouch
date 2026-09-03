@@ -508,11 +508,19 @@ def sensor_ready(device: dict[str, str]) -> None:
         raise ToolError("The fingerprint sensor is not ready. Resolve that before setup.")
 
 
-def unlock(port: str, *, explain_pin: bool = False) -> None:
+def unlock(
+    port: str, *, explain_pin: bool = False,
+    reason: str = "unlock configuration",
+) -> None:
     deadline = time.monotonic() + 6.0
     while True:
         try:
-            serial_command(port, "AUTH", timeout=15)
+            serial_command(
+                port,
+                "AUTH",
+                timeout=15,
+                touch_prompt=f"Touch the fingerprint sensor now to {reason}.",
+            )
             if explain_pin:
                 explain_piv_pin()
             return
@@ -706,7 +714,8 @@ def enroll(port: str, skip: bool) -> None:
     if count:
         if ask("Replace the existing fingerprint enrollment? [y/N] ").lower() not in {"y", "yes"}:
             raise ToolError("Fingerprint enrollment was not changed.")
-    unlock(port)
+    say("")
+    unlock(port, reason="start fingerprint enrollment")
     views = ("left edge", "right edge", "top", "center")
     for slot, view in enumerate(views, 1):
         say("")
@@ -724,8 +733,6 @@ def enroll(port: str, skip: bool) -> None:
 def command_setup(args: argparse.Namespace) -> None:
     require_macos()
     mode = choose_mode(args.mode)
-    if mode == "piv":
-        say("Setting up PIV certificates. This may take a moment.")
     port = choose_port(args.port)
     # Setup starts from one known state. Remove the old HID service before
     # opening the CDC port. Keep that port open through the entire setup.
@@ -747,15 +754,24 @@ def command_setup(args: argparse.Namespace) -> None:
             explain_piv_pin()
             return
         if device.get("mode") != mode:
-            unlock(port, explain_pin=mode == "piv")
+            unlock(
+                port,
+                reason=f"switch to {mode.upper()} mode",
+            )
             serial_command(port, f"SET MODE {mode.upper()}", timeout=4)
             mode_changed = True
         elif mode == "hid":
-            unlock(port)
+            unlock(port, reason="configure HID mode")
             configure_hid(port, device)
         else:
-            unlock(port, explain_pin=True)
             if device.get("piv") != "ready":
+                say("")
+                say("Setting up PIV certificates. This may take a moment.")
+                unlock(
+                    port,
+                    explain_pin=True,
+                    reason="create your PIV identity",
+                )
                 serial_command(port, "PIV CREATE", timeout=45)
                 piv_rescan_needed = True
         if not mode_changed and not piv_rescan_needed:
@@ -767,10 +783,12 @@ def command_setup(args: argparse.Namespace) -> None:
     if mode_changed:
         notify("tinyTouch mode changed", "Reconnect tinyTouch for the new mode to apply.")
         say(f"{mode.upper()} mode was selected.")
-        say("Please unplug tinyTouch and reconnect it for the new mode to apply.")
+        say("")
+        say("Please unplug and reconnect tinyTouch to apply the new mode.")
         say("Waiting for the device to disconnect...")
         reconnected_port = wait_for_reconnect(port)
         say("Device reconnected. Continuing setup...")
+        say("")
         resumed = argparse.Namespace(**vars(args))
         resumed.mode = mode
         resumed.port = reconnected_port
@@ -790,20 +808,28 @@ def command_setup(args: argparse.Namespace) -> None:
             raise ToolError("HID setup is incomplete: the helper is not loaded.")
     if mode == "piv" and not args.no_pair:
         command_pair(args)
-    say(f"tinyTouch is ready in {mode.upper()} mode.")
+    say("")
+    if mode == "piv":
+        say("tinyTouch is ready in PIV mode. All changes are live; no restart is required.")
+    else:
+        say("tinyTouch is ready in HID mode.")
 
 
 def command_mode(args: argparse.Namespace) -> None:
     port = choose_port(args.port)
     device = status(port)
     protocol6(device)
-    unlock(port, explain_pin=args.mode == "piv")
+    unlock(
+        port,
+        reason=f"switch to {args.mode.upper()} mode",
+    )
     serial_command(port, f"SET MODE {args.mode.upper()}", timeout=4)
     if args.mode == "piv":
         remove_helper()
     notify("tinyTouch mode changed", "Reconnect tinyTouch for the new mode to apply.")
     say(f"{args.mode.upper()} mode was selected.")
-    say("Please unplug tinyTouch and reconnect it for the new mode to apply.")
+    say("")
+    say("Please unplug and reconnect tinyTouch to apply the new mode.")
     say("Waiting for the device to disconnect...")
     reconnected_port = wait_for_reconnect(port)
     fresh_status(reconnected_port, {"mode": args.mode.lower()})
@@ -819,12 +845,12 @@ def command_config(args: argparse.Namespace) -> None:
     if args.value is None:
         say(json.dumps(device, indent=2, sort_keys=True))
         return
-    unlock(port)
+    unlock(port, reason="change this setting")
     names = {"typing_delay_ms": "TYPE_DELAY", "submit_enter": "SUBMIT_ENTER", "touch_cooldown_ms": "COOLDOWN"}
     device_name = names.get(args.name, args.name.upper())
     serial_command(port, f"SET {device_name} {args.value}", timeout=4)
     fresh_status(port, {device_name.lower(): args.value})
-    say(f"Setting {args.name}={args.value} is active live.")
+    say(f"Updated {args.name} to {args.value}.")
 
 
 def command_enroll(args: argparse.Namespace) -> None:
@@ -832,7 +858,7 @@ def command_enroll(args: argparse.Namespace) -> None:
     device = status(port)
     protocol6(device)
     sensor_ready(device)
-    unlock(port)
+    unlock(port, reason="add this fingerprint")
     serial_command(port, f"FINGER ENROLL {args.slot}", timeout=45)
     current = status(port)
     if int(current.get("fingerprints", "0")) < 1:
@@ -843,12 +869,12 @@ def command_delete(args: argparse.Namespace) -> None:
     port = choose_port(args.port)
     device = status(port)
     protocol6(device)
-    unlock(port)
+    unlock(port, reason="delete this fingerprint")
     serial_command(port, f"FINGER DELETE {args.slot}", timeout=5)
     current = status(port)
     if int(current.get("fingerprints", "0")) < 0:
         raise ToolError("Live verification failed after deleting the fingerprint.")
-    say(f"Fingerprint slot {args.slot} was deleted live.")
+    say(f"Fingerprint slot {args.slot} was deleted.")
 
 
 def command_computers(args: argparse.Namespace) -> None:
@@ -865,7 +891,7 @@ def command_computers(args: argparse.Namespace) -> None:
         identifier = args.remove.lower()
         if identifier not in registered:
             raise ToolError(f"HID host {args.remove} is not registered on this device.")
-        unlock(port)
+        unlock(port, reason="remove this computer")
         serial_command(port, f"HOST REMOVE {identifier}", timeout=5)
         if identifier in host_list(port)[0]:
             raise ToolError("Live verification failed: the HID host is still registered.")
@@ -877,7 +903,7 @@ def command_computers(args: argparse.Namespace) -> None:
                     keychain_delete(PAIRING_SERVICE, account)
             except ValueError:
                 pass
-        say(f"HID host {identifier} was removed live.")
+        say(f"HID computer {identifier} was removed.")
 
 
 def command_factory_reset(args: argparse.Namespace) -> None:
@@ -887,7 +913,7 @@ def command_factory_reset(args: argparse.Namespace) -> None:
     if ask("Factory reset clears fingerprints, keys, hosts, and settings. Continue? [y/N] ").lower() not in {"y", "yes"}:
         raise ToolError("Factory reset cancelled.")
     remove_helper()
-    unlock(port)
+    unlock(port, reason="confirm the factory reset")
     serial_command(port, "RESET FACTORY", timeout=15)
     cleared = status(port)
     for key, expected in (("fingerprints", "0"), ("hosts", "0"), ("piv", "unconfigured")):
@@ -922,8 +948,12 @@ def stage_ota(port: str, image: bytes, digest: str) -> None:
     except (ToolError, SerialTimeout):
         # Firmware before 0.1.1 does not support an unscoped abort.
         pass
-    say("Wait for the prompt before touching the fingerprint sensor.")
-    serial_command(port, "AUTH", timeout=15)
+    serial_command(
+        port,
+        "AUTH",
+        timeout=15,
+        touch_prompt="Touch the fingerprint sensor now to approve the firmware update.",
+    )
     token = secrets.token_hex(16)
     was_loaded = unload_helper()
     try:
@@ -1155,11 +1185,11 @@ def command_keys(args: argparse.Namespace) -> None:
     port = choose_port(args.port)
     device = status(port)
     protocol6(device)
-    unlock(port)
+    unlock(port, reason="create the PIV identity")
     serial_command(port, "PIV CREATE", timeout=15)
     if status(port).get("piv") != "ready":
         raise ToolError("Live verification failed: the PIV identity is not ready.")
-    say("The PIV identity is active live. The device was not restarted.")
+    say("The PIV identity is ready.")
 
 
 def piv_identities() -> tuple[list[str], list[str]]:
@@ -1212,7 +1242,12 @@ def command_pair(args: argparse.Namespace) -> None:
     # terminal password prompt can outlive firmware's short PIV authorization.
     authorize_macos()
     port = choose_port(args.port)
-    unlock(port, explain_pin=True)
+    say("")
+    unlock(
+        port,
+        explain_pin=True,
+        reason="pair PIV with this Mac",
+    )
     try:
         run(["sudo", "-n", "sc_auth", "pair", "-u", getpass.getuser(), "-h", identity])
     except ToolError:
@@ -1222,7 +1257,7 @@ def command_pair(args: argparse.Namespace) -> None:
         paired_after, _ = piv_identities()
         if identity not in paired_after:
             raise
-    say("PIV is paired with this Mac. The device was not restarted.")
+    say("PIV is paired with this Mac.")
 
 
 def parser() -> argparse.ArgumentParser:
