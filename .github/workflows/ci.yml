@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -46,6 +48,13 @@ jobs:
             --firmware-build "$build" \
             --build-id "${GITHUB_SHA:0:12}"
           python3 packaging/release_integrity.py firmware dist/release --commit "$GITHUB_SHA"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: tinytouch-firmware-rp2040
+          path: |
+            firmware/tiny_touch_unified/build/tiny_touch_unified.uf2
+            firmware/tiny_touch_unified/build/tiny_touch_unified.signed.bin
+          if-no-files-found: error
 
   macos-cli:
     strategy:

@@ -90,6 +90,12 @@ target_compile_definitions(tiny_touch_unified PRIVATE
   TINYTOUCH_BUILD_ID="${TINYTOUCH_BUILD_ID}"
   TINYTOUCH_PROTOCOL_VERSION=6
 )
+# Optional sensor pin overrides, e.g. -DTINYTOUCH_FP_TX_PIN=4 -DTINYTOUCH_FP_RX_PIN=5.
+foreach(pin TX RX INT)
+  if(DEFINED TINYTOUCH_FP_${pin}_PIN)
+    target_compile_definitions(tiny_touch_unified PRIVATE FP_${pin}_PIN=${TINYTOUCH_FP_${pin}_PIN})
+  endif()
+endforeach()
 if(TINYTOUCH_DEVELOPMENT_SKIP_FINGERPRINT_AUTH)
   target_compile_definitions(tiny_touch_unified PRIVATE
     TINYTOUCH_DEVELOPMENT_SKIP_FINGERPRINT_AUTH=1)

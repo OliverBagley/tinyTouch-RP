@@ -48,6 +48,21 @@ git clone https://github.com/OliverBagley/tinyTouch-RP.git ~/tinyTouch-RP && cd 
 
 ## Part 2: Build the firmware
 
+There are two ways. Pick one.
+
+### Way A: let GitHub build it (no tools needed)
+
+Every push to the `main` branch of your fork builds the firmware on GitHub's computers.
+
+1. Open your repository on github.com and click the **Actions** tab.
+2. Click the newest **CI** run at the top. Wait until it has a green tick.
+3. Scroll down to **Artifacts** and click **tinytouch-firmware-rp2040**. A zip downloads.
+4. Unzip it. Inside is `tiny_touch_unified.uf2`. That is the firmware. Skip to Part 3.
+
+If you change anything (like the pins in Part 3), commit and push, and a new build appears the same way. You still need Part 1 step 5 (downloading the project) and `python3` for Part 5, but you can skip steps 2 to 4 of Part 1.
+
+### Way B: build on your Mac
+
 Still in Terminal, inside the project folder:
 
 ```bash
@@ -83,6 +98,41 @@ Two rules that catch everyone:
 - Only use **3V3**, never 5V. The sensor is 3.3 volt.
 
 Double check that 3V3 and GND do not touch each other before plugging in USB.
+
+### My sensor or board uses different pins
+
+The board is the boss, not the sensor: the sensor's six wires can go to any pins you like, as long as the firmware knows which ones. Only the three numbered pins matter. Power and ground can use any 3V3 and GND pin.
+
+The RP2040 chip can only do serial (TX/RX) on certain pin pairs. Pick **one pair** from this table. TouchOut can be any other free GP pin.
+
+| Board TX pin (sensor RX) | Board RX pin (sensor TX) |
+|---|---|
+| GP0 | GP1 (this is the default) |
+| GP4 | GP5 |
+| GP8 | GP9 |
+| GP12 | GP13 |
+| GP28 | GP29 |
+
+To change them:
+
+1. Open the file `firmware/tiny_touch_unified/main/fingerprint.c` in any text editor (TextEdit works; in Terminal, `open -e firmware/tiny_touch_unified/main/fingerprint.c`).
+2. Near the top you will see these three lines. Change the numbers only.
+
+```c
+#define FP_TX_PIN 0
+#define FP_RX_PIN 1
+#define FP_INT_PIN 2
+```
+
+   For example, GP8/GP9 with TouchOut on GP10 becomes `8`, `9`, `10`.
+
+3. Save the file, then build again (Part 2). If you picked a pair that the chip cannot do, the build stops and prints a message that lists the valid pairs, so you cannot accidentally make a broken firmware.
+
+If you build on your Mac you can also skip editing the file and type the pins on the command line instead:
+
+```bash
+cd ~/tinyTouch-RP/firmware/tiny_touch_unified && cmake -S . -B build -DPICO_SDK_PATH=$HOME/pico-sdk -DTINYTOUCH_FP_TX_PIN=8 -DTINYTOUCH_FP_RX_PIN=9 -DTINYTOUCH_FP_INT_PIN=10 && cmake --build build --parallel
+```
 
 ## Part 4: Put the firmware on the board
 
@@ -131,7 +181,7 @@ When the password prompt appears, touch the sensor. If it says nothing else, it 
 ## If something goes wrong
 
 - **Check the board is talking:** `python3 tinytouch status`. You want `sensor=ready` and `protocol=6`.
-- **"sensor=offline":** the wiring is wrong. Recheck Part 3, especially TX/RX being crossed. Then unplug and replug the board.
+- **"sensor=offline":** the wiring is wrong, or the firmware thinks the sensor is on different pins. Recheck Part 3, especially TX/RX being crossed and the pin numbers in the firmware. Then unplug and replug the board.
 - **The RPI-RP2 drive never appears:** you let go of BOOT too early, or the cable is charge-only. Try again with BOOT held the whole time you plug in.
 - **Start over completely:** `python3 tinytouch factory-reset` erases fingerprints and keys. Then run setup again.
 - **Firmware totally broken:** hold BOOT and plug in, then copy the `.uf2` again (Part 4). This always works. The chip cannot be bricked this way.
