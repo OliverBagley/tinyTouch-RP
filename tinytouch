@@ -511,7 +511,7 @@ def ensure_helper_environment() -> Path:
     python = VENV / "bin" / "python"
     if not python.exists():
         run([sys.executable, "-m", "venv", str(VENV)])
-    probe = subprocess.run([str(python), "-c", "import serial"], check=False)
+    probe = subprocess.run([str(python), "-c", "import serial"], check=False, capture_output=True)
     if probe.returncode:
         run([str(python), "-m", "pip", "install", "-q", "-r", str(REQUIREMENTS)])
     return python
