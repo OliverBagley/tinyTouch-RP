@@ -122,7 +122,11 @@ def run(command: list[str], **kwargs):
     except FileNotFoundError as exc:
         raise ToolError(f"Required command is unavailable: {command[0]}") from exc
     except subprocess.CalledProcessError as exc:
-        detail = (exc.stderr or "").strip() if isinstance(exc.stderr, str) else ""
+        detail = ""
+        for output in (exc.stderr, exc.stdout):
+            if isinstance(output, str) and output.strip():
+                detail = output.strip()
+                break
         raise ToolError(detail or f"Command failed: {command[0]}") from exc
 
 
@@ -1366,15 +1370,38 @@ def command_pair(
         explain_pin=True,
         reason="pair PIV with this Mac",
     )
+    keychain_warning = False
     try:
-        run(["sudo", "-n", "sc_auth", "pair", "-u", getpass.getuser(), "-h", identity])
-    except ToolError:
+        result = run(
+            ["sudo", "-n", "sc_auth", "pair", "-u", getpass.getuser(), "-h", identity],
+            text=True,
+            capture_output=True,
+        )
+        pair_output = "\n".join(
+            output
+            for output in (result.stdout, result.stderr)
+            if isinstance(output, str)
+        )
+        keychain_warning = (
+            "password will be required after next SmartCard login" in pair_output
+        )
+    except ToolError as exc:
         # sc_auth can persist the user pairing before a later card proof fails.
         # Treat that partial command result as success only when macOS confirms
         # that it paired the identity selected above.
         paired_after, _ = piv_identities()
         if identity not in paired_after:
+            if "CryptoTokenKit error -8" in str(exc):
+                raise ToolError(
+                    "macOS rejected this PIV identity. Run 'tinytouch update', "
+                    "then run setup again."
+                ) from exc
             raise
+    if keychain_warning:
+        raise ToolError(
+            "macOS paired PIV but could not configure Login Keychain unlock. "
+            "Run 'tinytouch update', then run setup again."
+        )
     say("PIV is paired with this Mac.")
 
 

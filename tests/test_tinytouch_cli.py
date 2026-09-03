@@ -274,6 +274,50 @@ class ProtocolSixTests(unittest.TestCase):
         self.assertEqual(calls, ["sudo", "touch"])
         self.assertTrue(unlock.call_args.kwargs["explain_pin"])
 
+    def test_piv_pair_explains_rejected_legacy_identity(self):
+        identity = "A" * 40
+        args = SimpleNamespace(port="/dev/cu.TT-1234")
+        with (
+            mock.patch.object(cli, "require_macos"),
+            mock.patch.object(
+                cli, "wait_for_piv_identities", return_value=([], [identity])
+            ),
+            mock.patch.object(cli, "authorize_macos"),
+            mock.patch.object(cli, "choose_port", return_value=args.port),
+            mock.patch.object(cli, "unlock"),
+            mock.patch.object(
+                cli, "run", side_effect=cli.ToolError("CryptoTokenKit error -8")
+            ),
+            mock.patch.object(cli, "piv_identities", return_value=([], [identity])),
+        ):
+            with self.assertRaisesRegex(
+                cli.ToolError, "macOS rejected this PIV identity"
+            ):
+                cli.command_pair(args)
+
+    def test_piv_pair_reports_missing_keychain_wrapping(self):
+        identity = "A" * 40
+        args = SimpleNamespace(port="/dev/cu.TT-1234")
+        result = SimpleNamespace(
+            stdout=(
+                "User was successfully paired but user password will be required "
+                "after next SmartCard login to unlock Login keychain."
+            ),
+            stderr="",
+        )
+        with (
+            mock.patch.object(cli, "require_macos"),
+            mock.patch.object(
+                cli, "wait_for_piv_identities", return_value=([], [identity])
+            ),
+            mock.patch.object(cli, "authorize_macos"),
+            mock.patch.object(cli, "choose_port", return_value=args.port),
+            mock.patch.object(cli, "unlock"),
+            mock.patch.object(cli, "run", return_value=result),
+        ):
+            with self.assertRaisesRegex(cli.ToolError, "Login Keychain unlock"):
+                cli.command_pair(args)
+
     def test_piv_identity_selection_recommends_the_default(self):
         identities = ["A" * 40, "B" * 40]
         args = SimpleNamespace(port="/dev/cu.TT-1234")
